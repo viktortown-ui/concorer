@@ -23,3 +23,7 @@ To enable Pages in the repository:
 1. Open **Settings → Pages**.
 2. In **Build and deployment**, set **Source** to **GitHub Actions**.
 3. Push to `main` (or trigger workflow manually) to publish `app/dist`.
+
+## Локальные данные
+
+Данные хранятся локально в браузере (IndexedDB). Чек-ины, история и агрегаты дашборда сохраняются на устройстве и не отправляются на сервер.
