@@ -78,3 +78,82 @@ body {
 .gate h1 {
   margin-bottom: 12px;
 }
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+  text-align: left;
+}
+
+.field input[type='number'] {
+  width: 100%;
+  padding: 8px;
+}
+
+.last-checkin {
+  margin-top: 20px;
+  text-align: left;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 16px;
+}
+
+.last-checkin ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 16px;
+  font-size: 14px;
+}
+
+.table th,
+.table td {
+  border: 1px solid #e5e7eb;
+  padding: 8px;
+  text-align: left;
+}
+
+.filters {
+  display: flex;
+  gap: 8px;
+}
+
+.filter-button {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.filter-button--active {
+  background: #111827;
+  color: #fff;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.import-label {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.import-label input {
+  display: none;
+}
