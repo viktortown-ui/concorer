@@ -50,7 +50,7 @@ function seeded(seed = 42): () => number {
   }
 }
 
-export async function seedDemoData(days = 30, seed = 42): Promise<void> {
+export async function seedTestData(days = 30, seed = 42): Promise<void> {
   const rand = seeded(seed)
   const now = Date.now()
   const rows: CheckinRecord[] = Array.from({ length: days }).map((_, index) => {
