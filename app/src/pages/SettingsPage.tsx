@@ -1,5 +1,5 @@
 import type { ChangeEventHandler } from 'react'
-import { clearAllData, exportDataBlob, importDataBlob, seedDemoData } from '../core/storage/repo'
+import { clearAllData, exportDataBlob, importDataBlob, seedTestData } from '../core/storage/repo'
 
 export function SettingsPage({ onDataChanged }: { onDataChanged: () => Promise<void> }) {
   const handleClear = async () => {
@@ -29,9 +29,9 @@ export function SettingsPage({ onDataChanged }: { onDataChanged: () => Promise<v
   }
 
   const handleSeed = async () => {
-    const raw = window.prompt('Введите seed (опционально)')
+    const raw = window.prompt('Введите Сид (seed) (опционально)')
     const seed = raw ? Number(raw) : 42
-    await seedDemoData(30, Number.isFinite(seed) ? seed : 42)
+    await seedTestData(30, Number.isFinite(seed) ? seed : 42)
     await onDataChanged()
   }
 
@@ -43,7 +43,7 @@ export function SettingsPage({ onDataChanged }: { onDataChanged: () => Promise<v
         <button type="button" onClick={handleExport}>Экспорт данных</button>
         <label className="import-label">Импорт данных<input type="file" onChange={handleImport} /></label>
         <button type="button" onClick={handleClear}>Очистить данные</button>
-        <button type="button" onClick={handleSeed}>Сгенерировать демо-данные (30 дней)</button>
+        <button type="button" onClick={handleSeed}>Сгенерировать тестовые данные (30 дней)</button>
       </div>
     </section>
   )
