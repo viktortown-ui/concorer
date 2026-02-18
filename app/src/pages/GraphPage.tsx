@@ -5,12 +5,24 @@ import { METRICS, type MetricId } from '../core/metrics'
 import { applyImpulse, defaultInfluenceMatrix, type InfluenceEdge } from '../core/engines/influence/influence'
 import { getTopEdges } from '../core/engines/influence/graphView'
 import type { InfluenceMatrix, MetricVector } from '../core/engines/influence/types'
-import { loadInfluenceMatrix, resetInfluenceMatrix, saveInfluenceMatrix } from '../core/storage/repo'
+import {
+  loadInfluenceLearnedMap,
+  loadInfluenceLearnedMeta,
+  loadInfluenceMatrix,
+  resetInfluenceMatrix,
+  saveInfluenceLearnedMap,
+  saveInfluenceLearnedMeta,
+  saveInfluenceMatrix,
+  seedTestData,
+  listCheckins,
+} from '../core/storage/repo'
 import { SparkButton } from '../ui/SparkButton'
 import { saveOracleScenarioDraft } from '../core/engines/influence/scenarioDraft'
 import { formatDateTime } from '../ui/format'
+import { learnInfluence, type LearnedInfluenceEdge } from '../core/engines/influenceLearn'
 
 type ViewMode = 'levers' | 'map' | 'matrix'
+type WeightsSource = 'manual' | 'learned' | 'mixed'
 
 interface GraphNode { id: MetricId; x?: number; y?: number }
 
@@ -21,9 +33,39 @@ function edgeMeaning(edge: InfluenceEdge): string {
   return `${fromLabel} ${action} ${toLabel} при изменении импульса.`
 }
 
+function toMatrix(edges: LearnedInfluenceEdge[]): InfluenceMatrix {
+  const matrix: Partial<InfluenceMatrix> = {}
+  for (const metric of METRICS) matrix[metric.id] = {}
+  for (const edge of edges) {
+    matrix[edge.from] = { ...matrix[edge.from], [edge.to]: edge.weight }
+  }
+  return matrix as InfluenceMatrix
+}
+
+
+function emptyMatrix(): InfluenceMatrix {
+  return METRICS.reduce<Partial<InfluenceMatrix>>((acc, metric) => {
+    acc[metric.id] = {}
+    return acc
+  }, {}) as InfluenceMatrix
+}
+
+function mergeMatrices(base: InfluenceMatrix, overrides: InfluenceMatrix): InfluenceMatrix {
+  const merged: Partial<InfluenceMatrix> = {}
+  for (const metric of METRICS) {
+    merged[metric.id] = { ...(base[metric.id] ?? {}), ...(overrides[metric.id] ?? {}) }
+  }
+  return merged as InfluenceMatrix
+}
+
 export function GraphPage() {
   const navigate = useNavigate()
-  const [matrix, setMatrix] = useState<InfluenceMatrix>(defaultInfluenceMatrix)
+  const [manualMatrix, setManualMatrix] = useState<InfluenceMatrix>(defaultInfluenceMatrix)
+  const [learnedMatrix, setLearnedMatrix] = useState<InfluenceMatrix>(emptyMatrix())
+  const [learnedMeta, setLearnedMeta] = useState<{ windowDays: number; computedAt: number } | null>(null)
+  const [learnedEdges, setLearnedEdges] = useState<LearnedInfluenceEdge[]>([])
+  const [windowDays, setWindowDays] = useState<14 | 30 | 90>(30)
+  const [weightsSource, setWeightsSource] = useState<WeightsSource>('manual')
   const [mode, setMode] = useState<ViewMode>('levers')
   const [selectedEdge, setSelectedEdge] = useState<{ from: MetricId; to: MetricId } | null>(null)
   const [source, setSource] = useState<MetricId | 'all'>('all')
@@ -36,19 +78,43 @@ export function GraphPage() {
   const [delta, setDelta] = useState(1)
   const [steps, setSteps] = useState<1 | 2 | 3>(2)
   const [testResult, setTestResult] = useState<MetricVector | null>(null)
+  const [learnError, setLearnError] = useState<string | null>(null)
 
-  useEffect(() => { void loadInfluenceMatrix().then(setMatrix) }, [])
+  useEffect(() => {
+    void (async () => {
+      const [manual, learned, meta] = await Promise.all([
+        loadInfluenceMatrix(),
+        loadInfluenceLearnedMap(),
+        loadInfluenceLearnedMeta(),
+      ])
+      setManualMatrix(manual)
+      setLearnedMatrix(learned)
+      setLearnedMeta(meta)
+    })()
+  }, [])
 
   const metricIds = METRICS.map((m) => m.id)
 
+  const activeMatrix = useMemo(() => {
+    if (weightsSource === 'manual') return manualMatrix
+    if (weightsSource === 'learned') return mergeMatrices(defaultInfluenceMatrix, learnedMatrix)
+    return mergeMatrices(mergeMatrices(defaultInfluenceMatrix, learnedMatrix), manualMatrix)
+  }, [weightsSource, manualMatrix, learnedMatrix])
+
+  const learnedEdgeMap = useMemo(() => {
+    const map = new Map<string, LearnedInfluenceEdge>()
+    learnedEdges.forEach((edge) => map.set(`${edge.from}-${edge.to}`, edge))
+    return map
+  }, [learnedEdges])
+
   const topEdges = useMemo(
-    () => getTopEdges(matrix, { source, target, sign, threshold, search, topN }),
-    [matrix, source, target, sign, threshold, search, topN],
+    () => getTopEdges(activeMatrix, { source, target, sign, threshold, search, topN }),
+    [activeMatrix, source, target, sign, threshold, search, topN],
   )
 
   const mapEdges = useMemo(
-    () => getTopEdges(matrix, { sign: 'all', threshold: 0.15, topN: Number.MAX_SAFE_INTEGER }),
-    [matrix],
+    () => getTopEdges(activeMatrix, { sign: 'all', threshold: 0.15, topN: Number.MAX_SAFE_INTEGER }),
+    [activeMatrix],
   )
 
   const nodes = useMemo(() => {
@@ -68,10 +134,11 @@ export function GraphPage() {
     return simNodes
   }, [mapEdges, metricIds])
 
-  const selectedWeight = selectedEdge ? matrix[selectedEdge.from]?.[selectedEdge.to] ?? 0 : 0
+  const selectedWeight = selectedEdge ? activeMatrix[selectedEdge.from]?.[selectedEdge.to] ?? 0 : 0
+  const selectedLearned = selectedEdge ? learnedEdgeMap.get(`${selectedEdge.from}-${selectedEdge.to}`) : undefined
 
   const updateEdge = (from: MetricId, to: MetricId, weight: number) => {
-    setMatrix((prev) => ({ ...prev, [from]: { ...prev[from], [to]: weight } }))
+    setManualMatrix((prev) => ({ ...prev, [from]: { ...prev[from], [to]: weight } }))
   }
 
   const selectEdge = (edge: InfluenceEdge | null) => {
@@ -89,7 +156,7 @@ export function GraphPage() {
     setDelta(value)
     const base = metricIds.reduce((acc, id) => ({ ...acc, [id]: 5 }), {} as MetricVector)
     base.cashFlow = 0
-    setTestResult(applyImpulse(base, { [metric]: value }, matrix, steps))
+    setTestResult(applyImpulse(base, { [metric]: value }, activeMatrix, steps))
   }
 
   const selectedMeaning = selectedEdge
@@ -106,6 +173,25 @@ export function GraphPage() {
     navigate('/oracle?prefill=1')
   }
 
+  const recomputeLearned = async (days: 14 | 30 | 90) => {
+    setWindowDays(days)
+    const checkins = await listCheckins(days)
+    const checkinsAsc = [...checkins].reverse()
+    if (checkinsAsc.length < 14) {
+      setLearnError('Недостаточно данных для обучения графа. Нужен минимум 14 чек-инов подряд, лучше 30+ для стабильности.')
+      setLearnedEdges([])
+      return
+    }
+    const edges = learnInfluence(checkinsAsc, metricIds, { method: 'baseline' })
+    const matrix = toMatrix(edges)
+    const meta = { windowDays: days, computedAt: Date.now() }
+    await Promise.all([saveInfluenceLearnedMap(matrix), saveInfluenceLearnedMeta(meta)])
+    setLearnError(null)
+    setLearnedEdges(edges)
+    setLearnedMatrix(matrix)
+    setLearnedMeta(meta)
+  }
+
   return <section className="page panel graph-page">
     <h1>Граф влияний</h1>
     <div className="mode-tabs">
@@ -113,6 +199,27 @@ export function GraphPage() {
       <button type="button" className={mode === 'map' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => setMode('map')}>Карта</button>
       <button type="button" className={mode === 'matrix' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => setMode('matrix')}>Матрица</button>
     </div>
+
+    <div className="filters graph-filters">
+      <span>Источник весов:</span>
+      <button type="button" className={weightsSource === 'manual' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => setWeightsSource('manual')}>Manual</button>
+      <button type="button" className={weightsSource === 'learned' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => setWeightsSource('learned')}>Learned</button>
+      <button type="button" className={weightsSource === 'mixed' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => setWeightsSource('mixed')}>Mixed</button>
+      <SparkButton type="button" onClick={() => void recomputeLearned(windowDays)}>Recompute ({windowDays} days)</SparkButton>
+      <select value={windowDays} onChange={(event) => setWindowDays(Number(event.target.value) as 14 | 30 | 90)}>
+        <option value={14}>14 дней</option>
+        <option value={30}>30 дней</option>
+        <option value={90}>90 дней</option>
+      </select>
+      {learnedMeta && <span>Обновлено: {formatDateTime(learnedMeta.computedAt)} · окно: {learnedMeta.windowDays} дней</span>}
+    </div>
+
+    {learnError && <div className="panel empty-state">
+      <h2>Недостаточно исторических данных</h2>
+      <p><strong>{learnError}</strong></p>
+      <p>Граф из данных строит предиктивные связи по ежедневным изменениям метрик, поэтому короткая история даёт шум.</p>
+      <SparkButton type="button" onClick={async () => { await seedTestData(30); await recomputeLearned(30) }}>Сгенерировать 30 дней тестовых данных</SparkButton>
+    </div>}
 
     <div className="graph-layout">
       <div>
@@ -122,12 +229,15 @@ export function GraphPage() {
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск по метрике" />
               <select value={source} onChange={(e) => setSource(e.target.value as MetricId | 'all')}><option value="all">Источник: все</option>{METRICS.map((m) => <option key={m.id} value={m.id}>{m.labelRu}</option>)}</select>
               <select value={target} onChange={(e) => setTarget(e.target.value as MetricId | 'all')}><option value="all">Цель: все</option>{METRICS.map((m) => <option key={m.id} value={m.id}>{m.labelRu}</option>)}</select>
-              <select value={sign} onChange={(e) => setSign(e.target.value as typeof sign)}><option value="all">Любой знак</option><option value="positive">Только усиливает</option><option value="negative">Только ослабляет</option></select>
+              <select value={sign} onChange={(e) => setSign(e.target.value as 'all' | 'positive' | 'negative')}><option value="all">Любой знак</option><option value="positive">Только усиливает</option><option value="negative">Только ослабляет</option></select>
               <label>|w| ≥ <input type="number" step={0.05} value={threshold} onChange={(e) => setThreshold(Number(e.target.value))} /></label>
               <label>Топ N <input type="number" min={1} max={40} value={topN} onChange={(e) => setTopN(Number(e.target.value))} /></label>
             </div>
-            <table className="table table--dense"><thead><tr><th>От</th><th>К</th><th>Вес</th><th>Смысл</th><th>Действие</th></tr></thead>
-              <tbody>{topEdges.map((edge) => <tr key={`${edge.from}-${edge.to}`} onClick={() => selectEdge(edge)} className={selectedEdge?.from === edge.from && selectedEdge?.to === edge.to ? 'row-active' : ''}><td>{METRICS.find((m) => m.id === edge.from)?.labelRu}</td><td>{METRICS.find((m) => m.id === edge.to)?.labelRu}</td><td>{edge.weight > 0 ? '+' : ''}{edge.weight.toFixed(2)}</td><td>{edgeMeaning(edge)}</td><td><button type="button" className="chip" onClick={(event) => { event.stopPropagation(); runImpulseTest(edge.from, edge.weight >= 0 ? 1 : -1) }}>Проверить импульсом</button> <button type="button" className="chip" onClick={(event) => { event.stopPropagation(); applyEdgeAsScenario(edge.from, edge.to, edge.weight) }}>Применить как сценарий</button></td></tr>)}</tbody></table>
+            <table className="table table--dense"><thead><tr><th>От</th><th>К</th><th>Вес</th>{weightsSource !== 'manual' && <><th>Lag</th><th>Confidence</th></>}<th>Смысл</th><th>Действие</th></tr></thead>
+              <tbody>{topEdges.map((edge) => {
+                const learned = learnedEdgeMap.get(`${edge.from}-${edge.to}`)
+                return <tr key={`${edge.from}-${edge.to}`} onClick={() => selectEdge(edge)} className={selectedEdge?.from === edge.from && selectedEdge?.to === edge.to ? 'row-active' : ''}><td>{METRICS.find((m) => m.id === edge.from)?.labelRu}</td><td>{METRICS.find((m) => m.id === edge.to)?.labelRu}</td><td>{edge.weight > 0 ? '+' : ''}{edge.weight.toFixed(2)}</td>{weightsSource !== 'manual' && <><td>{learned?.lag ?? '—'}</td><td>{typeof learned?.confidence === 'number' ? learned.confidence.toFixed(2) : '—'}</td></>}<td>{edgeMeaning(edge)}</td><td><button type="button" className="chip" onClick={(event) => { event.stopPropagation(); runImpulseTest(edge.from, edge.weight >= 0 ? 1 : -1) }}>Проверить импульсом</button> <button type="button" className="chip" onClick={(event) => { event.stopPropagation(); applyEdgeAsScenario(edge.from, edge.to, edge.weight) }}>Применить как сценарий</button></td></tr>
+              })}</tbody></table>
           </>
         )}
 
@@ -143,7 +253,7 @@ export function GraphPage() {
             {nodes.map((node) => {
               const label = METRICS.find((m) => m.id === node.id)?.labelRu ?? node.id
               const isActive = activeNode === node.id
-              return <g key={node.id} transform={`translate(${node.x ?? 0}, ${node.y ?? 0})`} onClick={() => setSelectedEdge({ from: node.id, to: Object.keys(matrix[node.id] ?? {})[0] as MetricId })}>
+              return <g key={node.id} transform={`translate(${node.x ?? 0}, ${node.y ?? 0})`} onClick={() => setSelectedEdge({ from: node.id, to: Object.keys(activeMatrix[node.id] ?? {})[0] as MetricId })}>
                 <circle r={isActive ? 20 : 15} fill={isActive ? '#090d1c' : '#1c2440'} />
                 <text y={4} fill="#fff" textAnchor="middle" fontSize={10}>{label}</text>
               </g>
@@ -154,7 +264,7 @@ export function GraphPage() {
         {mode === 'matrix' && (
           <table className="table table--dense"><thead><tr><th>От \ К</th>{metricIds.map((id) => <th key={id}>{METRICS.find((m) => m.id === id)?.labelRu}</th>)}</tr></thead>
             <tbody>{metricIds.map((fromId) => <tr key={fromId}><td>{METRICS.find((m) => m.id === fromId)?.labelRu}</td>{metricIds.map((toId) => {
-              const weight = matrix[fromId]?.[toId] ?? 0
+              const weight = activeMatrix[fromId]?.[toId] ?? 0
               return <td key={toId}><button type="button" className="heat-cell" style={{ background: `rgba(${weight > 0 ? '67,243,208' : '192,132,252'}, ${Math.abs(weight)})` }} onClick={() => setSelectedEdge({ from: fromId, to: toId })}>{weight.toFixed(1)}</button></td>
             })}</tr>)}</tbody></table>
         )}
@@ -165,14 +275,20 @@ export function GraphPage() {
         {!selectedEdge ? <p>Выберите связь в списке, на карте или в матрице.</p> : <>
           <p><strong>{METRICS.find((m) => m.id === selectedEdge.from)?.labelRu}</strong> → <strong>{METRICS.find((m) => m.id === selectedEdge.to)?.labelRu}</strong></p>
           <p>Вес: {selectedWeight >= 0 ? '+' : ''}{selectedWeight.toFixed(2)}</p>
+          {weightsSource !== 'manual' && <>
+            <p>Lag: {selectedLearned?.lag ?? '—'}</p>
+            <p>Confidence: {typeof selectedLearned?.confidence === 'number' ? selectedLearned.confidence.toFixed(2) : '—'}</p>
+            <p>Оценка построена на корреляции дневных Δ. Это предиктивная связь, а не абсолютная причинность.</p>
+          </>}
           <p>{selectedMeaning}</p>
-          <input type="range" min={-1} max={1} step={0.05} value={selectedWeight} onChange={(e) => updateEdge(selectedEdge.from, selectedEdge.to, Number(e.target.value))} />
+          <input type="range" min={-1} max={1} step={0.05} value={manualMatrix[selectedEdge.from]?.[selectedEdge.to] ?? 0} onChange={(e) => updateEdge(selectedEdge.from, selectedEdge.to, Number(e.target.value))} />
+          <p>Ручные правки всегда сохраняются в Manual-карту и в режиме Mixed переопределяют Learned.</p>
           <div className="preset-row">{[-0.8, -0.4, 0, 0.4, 0.8].map((preset) => <button key={preset} type="button" className="chip" onClick={() => updateEdge(selectedEdge.from, selectedEdge.to, preset)}>Применить пресет {preset > 0 ? '+' : ''}{preset}</button>)}</div>
           <button type="button" onClick={() => applyEdgeAsScenario(selectedEdge.from, selectedEdge.to, selectedWeight)}>Применить как сценарий</button>
         </>}
         <div className="settings-actions">
-          <SparkButton type="button" onClick={() => saveInfluenceMatrix(matrix)}>Сохранить карту</SparkButton>
-          <SparkButton type="button" onClick={async () => { await resetInfluenceMatrix(); setMatrix(await loadInfluenceMatrix()) }}>Сброс к умолчанию</SparkButton>
+          <SparkButton type="button" onClick={() => saveInfluenceMatrix(manualMatrix)}>Сохранить manual-карту</SparkButton>
+          <SparkButton type="button" onClick={async () => { await resetInfluenceMatrix(); setManualMatrix(await loadInfluenceMatrix()) }}>Сброс manual к умолчанию</SparkButton>
         </div>
       </aside>
     </div>

@@ -84,9 +84,22 @@ function clamp(id: MetricId, value: number): number {
   return Math.max(metric.min, Math.min(metric.max, Number(value.toFixed(metric.step < 1 ? 1 : 0))))
 }
 
+export interface InfluenceLearnedMeta {
+  windowDays: number
+  computedAt: number
+}
+
+
+function emptyInfluenceMatrix(): InfluenceMatrix {
+  return METRICS.reduce<Partial<InfluenceMatrix>>((acc, metric) => {
+    acc[metric.id] = {}
+    return acc
+  }, {}) as InfluenceMatrix
+}
+
 export async function loadInfluenceMatrix(): Promise<InfluenceMatrix> {
   const row = await db.settings.get('influence-matrix')
-  return row?.value ?? defaultInfluenceMatrix
+  return (row?.value as InfluenceMatrix | undefined) ?? defaultInfluenceMatrix
 }
 
 export async function saveInfluenceMatrix(value: InfluenceMatrix): Promise<void> {
@@ -95,6 +108,24 @@ export async function saveInfluenceMatrix(value: InfluenceMatrix): Promise<void>
 
 export async function resetInfluenceMatrix(): Promise<void> {
   await saveInfluenceMatrix(defaultInfluenceMatrix)
+}
+
+export async function loadInfluenceLearnedMap(): Promise<InfluenceMatrix> {
+  const row = await db.settings.get('influence-learned-map')
+  return (row?.value as InfluenceMatrix | undefined) ?? emptyInfluenceMatrix()
+}
+
+export async function saveInfluenceLearnedMap(value: InfluenceMatrix): Promise<void> {
+  await db.settings.put({ key: 'influence-learned-map', value, updatedAt: Date.now() })
+}
+
+export async function loadInfluenceLearnedMeta(): Promise<InfluenceLearnedMeta | null> {
+  const row = await db.settings.get('influence-learned-meta')
+  return (row?.value as InfluenceLearnedMeta | undefined) ?? null
+}
+
+export async function saveInfluenceLearnedMeta(value: InfluenceLearnedMeta): Promise<void> {
+  await db.settings.put({ key: 'influence-learned-meta', value, updatedAt: Date.now() })
 }
 
 
