@@ -1,12 +1,12 @@
 import { Dexie, type EntityTable } from 'dexie'
 import type { CheckinRecord } from '../models/checkin'
 import type { AppEventRecord } from '../models/event'
-import type { InfluenceMatrix, OracleScenario } from '../engines/influence/types'
+import type { OracleScenario } from '../engines/influence/types'
 import type { QuestRecord } from '../models/quest'
 
 export interface AppSettingRecord {
   key: string
-  value: InfluenceMatrix
+  value: unknown
   updatedAt: number
 }
 
