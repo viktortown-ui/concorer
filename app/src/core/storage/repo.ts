@@ -1,9 +1,11 @@
 import { exportDB, importDB } from 'dexie-export-import'
 import type { CheckinRecord, CheckinValues } from '../models/checkin'
 import { METRICS, type MetricId } from '../metrics'
+import { trainLearnedInfluenceMatrix, type LearnedMatrix } from '../engines/influence/learnedInfluenceEngine'
 import { db } from './db'
 import type { QuestRecord } from '../models/quest'
 import { defaultInfluenceMatrix } from '../engines/influence/influence'
+import { hashMetricSet, learnedMatrixKey } from './learnedMatrix'
 import type { InfluenceMatrix, OracleScenario } from '../engines/influence/types'
 import { completeQuest } from '../engines/engagement/quests'
 import { computeCoreState, type CoreStateSnapshot } from '../engines/stateEngine'
@@ -89,17 +91,8 @@ function clamp(id: MetricId, value: number): number {
   return Math.max(metric.min, Math.min(metric.max, Number(value.toFixed(metric.step < 1 ? 1 : 0))))
 }
 
-export interface InfluenceLearnedMeta {
-  windowDays: number
-  computedAt: number
-}
 
-function emptyInfluenceMatrix(): InfluenceMatrix {
-  return METRICS.reduce<Partial<InfluenceMatrix>>((acc, metric) => {
-    acc[metric.id] = {}
-    return acc
-  }, {}) as InfluenceMatrix
-}
+
 
 export async function loadInfluenceMatrix(): Promise<InfluenceMatrix> {
   const row = await db.settings.get('influence-matrix')
@@ -114,22 +107,46 @@ export async function resetInfluenceMatrix(): Promise<void> {
   await saveInfluenceMatrix(defaultInfluenceMatrix)
 }
 
-export async function loadInfluenceLearnedMap(): Promise<InfluenceMatrix> {
-  const row = await db.settings.get('influence-learned-map')
-  return (row?.value as InfluenceMatrix | undefined) ?? emptyInfluenceMatrix()
+export interface RecomputeLearnedMatrixParams {
+  trainedOnDays: 30 | 60 | 'all'
+  lags: 1 | 2 | 3
 }
 
-export async function saveInfluenceLearnedMap(value: InfluenceMatrix): Promise<void> {
-  await db.settings.put({ key: 'influence-learned-map', value, updatedAt: Date.now() })
+function metricSetHashCurrent(): string {
+  return hashMetricSet(METRICS.map((metric) => metric.id))
 }
 
-export async function loadInfluenceLearnedMeta(): Promise<InfluenceLearnedMeta | null> {
-  const row = await db.settings.get('influence-learned-meta')
-  return (row?.value as InfluenceLearnedMeta | undefined) ?? null
+export async function getLearnedMatrix(): Promise<LearnedMatrix | null> {
+  const metricSetHash = metricSetHashCurrent()
+  const rows = await db.learnedMatrices.where('metricSetHash').equals(metricSetHash).sortBy('computedAt')
+  return rows.at(-1)?.value ?? null
 }
 
-export async function saveInfluenceLearnedMeta(value: InfluenceLearnedMeta): Promise<void> {
-  await db.settings.put({ key: 'influence-learned-meta', value, updatedAt: Date.now() })
+export async function recomputeLearnedMatrix(params: RecomputeLearnedMatrixParams): Promise<LearnedMatrix> {
+  const checkinsDesc = await listCheckins(params.trainedOnDays === 'all' ? undefined : params.trainedOnDays)
+  const checkinsAsc = [...checkinsDesc].reverse()
+  const learned = trainLearnedInfluenceMatrix(checkinsAsc, METRICS, {
+    trainedOnDays: params.trainedOnDays,
+    lags: params.lags,
+  })
+
+  const metricSetHash = metricSetHashCurrent()
+  const key = learnedMatrixKey(metricSetHash, learned.meta.trainedOnDays, learned.meta.lags)
+
+  await db.learnedMatrices.put({
+    key,
+    metricSetHash,
+    trainedOnDays: learned.meta.trainedOnDays,
+    lags: learned.meta.lags,
+    computedAt: learned.meta.computedAt,
+    value: learned,
+  })
+
+  return learned
+}
+
+export async function clearLearnedMatrices(): Promise<void> {
+  await db.learnedMatrices.clear()
 }
 
 export async function addQuest(quest: QuestRecord): Promise<QuestRecord> {

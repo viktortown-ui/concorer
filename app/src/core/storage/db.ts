@@ -4,6 +4,7 @@ import type { AppEventRecord } from '../models/event'
 import type { OracleScenario } from '../engines/influence/types'
 import type { QuestRecord } from '../models/quest'
 import type { StateSnapshotRecord } from '../models/state'
+import type { LearnedMatrixRecord } from './learnedMatrix'
 
 export interface AppSettingRecord {
   key: string
@@ -15,7 +16,7 @@ export interface OracleScenarioRecord extends OracleScenario {
   id?: number
 }
 
-export const schemaVersion = 4
+export const schemaVersion = 5
 
 class GamnoDb extends Dexie {
   checkins!: EntityTable<CheckinRecord, 'id'>
@@ -24,6 +25,7 @@ class GamnoDb extends Dexie {
   scenarios!: EntityTable<OracleScenarioRecord, 'id'>
   quests!: EntityTable<QuestRecord, 'id'>
   stateSnapshots!: EntityTable<StateSnapshotRecord, 'id'>
+  learnedMatrices!: EntityTable<LearnedMatrixRecord, 'key'>
 
   constructor() {
     super('gamno-db')
@@ -39,6 +41,7 @@ class GamnoDb extends Dexie {
       scenarios: '++id,ts,nameRu',
       quests: '++id,createdAt,status',
       stateSnapshots: '++id,ts,level',
+      learnedMatrices: '&key,metricSetHash,computedAt,trainedOnDays,lags',
     })
   }
 }
