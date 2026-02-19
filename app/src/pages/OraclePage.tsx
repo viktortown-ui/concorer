@@ -2,10 +2,19 @@ import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { INDEX_METRIC_IDS, METRICS, type MetricId } from '../core/metrics'
 import type { CheckinRecord } from '../core/models/checkin'
-import { addQuest, addScenario, listCheckins, listScenarios, loadInfluenceMatrix, seedTestData } from '../core/storage/repo'
+import {
+  addQuest,
+  addScenario,
+  getLearnedMatrix,
+  listCheckins,
+  listScenarios,
+  loadInfluenceMatrix,
+  seedTestData,
+} from '../core/storage/repo'
 import { explainDriverInsights } from '../core/engines/influence/influence'
 import { consumeOracleScenarioDraft } from '../core/engines/influence/scenarioDraft'
-import type { InfluenceMatrix, MetricVector, OracleScenario } from '../core/engines/influence/types'
+import { resolveActiveMatrix } from '../core/engines/influence/weightsSource'
+import type { InfluenceMatrix, MetricVector, OracleScenario, WeightsSource } from '../core/engines/influence/types'
 import { computeIndexDay } from '../core/engines/analytics/compute'
 import { formatDateTime, formatNumber } from '../ui/format'
 import { buildPlaybook, propagateBySteps } from '../core/engines/influence/oracle'
@@ -29,13 +38,13 @@ function toVector(base?: CheckinRecord): MetricVector | undefined {
 
 export function OraclePage({ latest, onQuestChange }: { latest?: CheckinRecord; onQuestChange: () => Promise<void> }) {
   const location = useLocation()
-  const initialDraft = useMemo(
-    () => (location.search.includes('prefill=1') ? consumeOracleScenarioDraft() : undefined),
-    [location.search],
-  )
+  const initialDraft = useMemo(() => (location.search.includes('prefill=1') ? consumeOracleScenarioDraft() : undefined), [location.search])
   const [impulses, setImpulses] = useState<Partial<Record<MetricId, number>>>(initialDraft?.impulses ?? {})
   const [focusMetrics, setFocusMetrics] = useState<MetricId[]>(initialDraft?.focusMetrics ?? ['energy', 'stress', 'sleepHours'])
-  const [matrix, setMatrix] = useState<InfluenceMatrix | null>(null)
+  const [manualMatrix, setManualMatrix] = useState<InfluenceMatrix | null>(null)
+  const [learnedMatrix, setLearnedMatrix] = useState<InfluenceMatrix | null>(null)
+  const [weightsSource, setWeightsSource] = useState<WeightsSource>(initialDraft?.weightsSource ?? 'manual')
+  const [mix, setMix] = useState<number>(initialDraft?.mix ?? 0.5)
   const [saved, setSaved] = useState<OracleScenario[]>([])
   const [baselineTs, setBaselineTs] = useState<number | 'latest'>(initialDraft?.baselineTs ?? 'latest')
   const [checkins, setCheckins] = useState<CheckinRecord[]>([])
@@ -44,25 +53,27 @@ export function OraclePage({ latest, onQuestChange }: { latest?: CheckinRecord; 
   const navigate = useNavigate()
 
   const refreshOracleData = async () => {
-    const [loadedMatrix, loadedScenarios, loadedCheckins] = await Promise.all([
+    const [loadedManualMatrix, loadedScenarios, loadedCheckins, loadedLearned] = await Promise.all([
       loadInfluenceMatrix(),
       listScenarios(),
       listCheckins(),
+      getLearnedMatrix(),
     ])
-    setMatrix(loadedMatrix)
+    setManualMatrix(loadedManualMatrix)
     setSaved(loadedScenarios)
     setCheckins(loadedCheckins)
+    setLearnedMatrix(loadedLearned?.weights ?? loadedManualMatrix)
   }
 
   useEffect(() => {
     let cancelled = false
-    void Promise.all([loadInfluenceMatrix(), listScenarios(), listCheckins()]).then(([loadedMatrix, loadedScenarios, loadedCheckins]) => {
+    void Promise.all([loadInfluenceMatrix(), listScenarios(), listCheckins(), getLearnedMatrix()]).then(([loadedManualMatrix, loadedScenarios, loadedCheckins, loadedLearned]) => {
       if (cancelled) return
-      setMatrix(loadedMatrix)
+      setManualMatrix(loadedManualMatrix)
       setSaved(loadedScenarios)
       setCheckins(loadedCheckins)
+      setLearnedMatrix(loadedLearned?.weights ?? loadedManualMatrix)
     })
-
     return () => {
       cancelled = true
     }
@@ -74,24 +85,15 @@ export function OraclePage({ latest, onQuestChange }: { latest?: CheckinRecord; 
   }, [baselineTs, checkins, latest])
 
   const baseVector = useMemo(() => toVector(baseline), [baseline])
+  const matrix = useMemo(() => {
+    if (!manualMatrix || !learnedMatrix) return null
+    return resolveActiveMatrix(weightsSource, manualMatrix, learnedMatrix, mix)
+  }, [weightsSource, manualMatrix, learnedMatrix, mix])
   const propagation = useMemo(() => (baseVector && matrix ? propagateBySteps(baseVector, impulses, matrix, 3) : undefined), [baseVector, impulses, matrix])
   const result = propagation?.[2]
 
   if (!baseline || !baseVector || !matrix || !result) {
-    return (
-      <section className="page panel">
-        <h1>Оракул</h1>
-        <article className="empty-state panel">
-          <h2>Нет базовой точки для сценариев</h2>
-          <p>Сначала нужно зафиксировать состояние, чтобы прогнозировать импульсы и последствия.</p>
-          <div className="settings-actions">
-            <SparkButton type="button" onClick={() => navigate('/core')}>Сделать чек-ин</SparkButton>
-            <SparkButton type="button" onClick={async () => { await seedTestData(30, 42); await refreshOracleData() }}>Сгенерировать тестовые данные (30 дней)</SparkButton>
-            <SparkButton type="button" onClick={() => navigate('/history')}>Выбрать базу из истории</SparkButton>
-          </div>
-        </article>
-      </section>
-    )
+    return <section className="page panel"><h1>Оракул</h1><article className="empty-state panel"><h2>Нет базовой точки для сценариев</h2><p>Сначала нужно зафиксировать состояние, чтобы прогнозировать импульсы и последствия.</p><div className="settings-actions"><SparkButton type="button" onClick={() => navigate('/core')}>Сделать чек-ин</SparkButton><SparkButton type="button" onClick={async () => { await seedTestData(30, 42); await refreshOracleData() }}>Сгенерировать тестовые данные (30 дней)</SparkButton><SparkButton type="button" onClick={() => navigate('/history')}>Выбрать базу из истории</SparkButton></div></article></section>
   }
 
   const baseIndex = computeIndexDay(baseline)
@@ -101,107 +103,51 @@ export function OraclePage({ latest, onQuestChange }: { latest?: CheckinRecord; 
   const drivers = explainDriverInsights(result, baseVector, matrix, 5)
   const playbook = buildPlaybook(baseVector, result, matrix)
 
-  const toggleMetric = (metricId: MetricId) => {
-    setFocusMetrics((prev) => {
-      if (prev.includes(metricId)) return prev.filter((id) => id !== metricId)
-      if (prev.length >= 5) return prev
-      return [...prev, metricId]
-    })
-  }
-
   return <section className="page panel">
     <h1>Оракул</h1>
     <p>Сначала задайте сценарий, потом смотрите последствия.</p>
     {prefillSource ? <p className="chip">{prefillSource}</p> : null}
-
-    <div className="preset-row">
-      {presets.map((preset) => (
-        <button key={preset.title} type="button" onClick={() => { setImpulses(preset.impulses); setFocusMetrics(preset.focus) }}>{preset.title}</button>
-      ))}
+    <div className="filters graph-filters"><span>Источник весов:</span>
+      <button type="button" className={weightsSource === 'manual' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => setWeightsSource('manual')}>Manual</button>
+      <button type="button" className={weightsSource === 'learned' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => setWeightsSource('learned')}>Learned</button>
+      <button type="button" className={weightsSource === 'mixed' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => setWeightsSource('mixed')}>Mixed</button>
+      {weightsSource === 'mixed' && <label>Mix {mix.toFixed(2)}<input type="range" min={0} max={1} step={0.05} value={mix} onChange={(e) => setMix(Number(e.target.value))} /></label>}
     </div>
+    <div className="preset-row">{presets.map((preset) => <button key={preset.title} type="button" onClick={() => { setImpulses(preset.impulses); setFocusMetrics(preset.focus) }}>{preset.title}</button>)}</div>
 
-    <div className="oracle-grid">
-      <article className="summary-card panel">
-        <h2>Базовая точка</h2>
-        <label>Чек-ин
-          <select value={baselineTs} onChange={(e) => setBaselineTs(e.target.value === 'latest' ? 'latest' : Number(e.target.value))}>
-            <option value="latest">Последний</option>
-            {checkins.map((row) => <option key={row.ts} value={row.ts}>{formatDateTime(row.ts)}</option>)}
-          </select>
-        </label>
-        <p>Индекс базы: <strong>{formatNumber(baseIndex)}</strong></p>
-      </article>
+    <div className="oracle-grid"><article className="summary-card panel"><h2>Базовая точка</h2><label>Чек-ин
+      <select value={baselineTs} onChange={(e) => setBaselineTs(e.target.value === 'latest' ? 'latest' : Number(e.target.value))}><option value="latest">Последний</option>{checkins.map((row) => <option key={row.ts} value={row.ts}>{formatDateTime(row.ts)}</option>)}</select>
+    </label><p>Индекс базы: <strong>{formatNumber(baseIndex)}</strong></p></article>
 
-      <article className="summary-card panel">
-        <h2>Конструктор сценария</h2>
-        <p>Выберите 3-5 метрик.</p>
-        <div className="metric-tags">{INDEX_METRIC_IDS.map((id) => {
-          const m = METRICS.find((item) => item.id === id)!
-          const active = focusMetrics.includes(id)
-          return <button key={id} type="button" className={active ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => toggleMetric(id)}>{m.labelRu}</button>
-        })}</div>
-        <div className="metric-cards">{focusMetrics.map((id) => {
-          const m = METRICS.find((item) => item.id === id)!
-          return <label key={id}>{m.labelRu} Δ<input type="number" value={impulses[id] ?? 0} onChange={(e) => setImpulses((p) => ({ ...p, [id]: Number(e.target.value) }))} /></label>
-        })}</div>
-      </article>
+    <article className="summary-card panel"><h2>Конструктор сценария</h2><p>Выберите 3-5 метрик.</p><div className="metric-tags">{INDEX_METRIC_IDS.map((id) => {
+      const m = METRICS.find((item) => item.id === id)!
+      const active = focusMetrics.includes(id)
+      return <button key={id} type="button" className={active ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => setFocusMetrics((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : prev.length >= 5 ? prev : [...prev, id])}>{m.labelRu}</button>
+    })}</div><div className="metric-cards">{focusMetrics.map((id) => {
+      const m = METRICS.find((item) => item.id === id)!
+      return <label key={id}>{m.labelRu} Δ<input type="number" value={impulses[id] ?? 0} onChange={(e) => setImpulses((p) => ({ ...p, [id]: Number(e.target.value) }))} /></label>
+    })}</div></article>
 
-      <article className="summary-card panel">
-        <h2>Результат</h2>
-        <p>Новый индекс: <strong>{formatNumber(scenarioIndex)}</strong></p>
-        <p>Δ индекса: <strong>{indexDelta > 0 ? '+' : ''}{formatNumber(indexDelta)}</strong></p>
-        <ol>{propagation.map((vector, idx) => <li key={idx}>Шаг {idx + 1}: {METRICS.map((m) => `${m.labelRu} ${formatNumber(vector[m.id])}`).join(' | ')}</li>)}</ol>
-        <button type="button" onClick={async () => {
-          const strongest = drivers[0]
-          if (!strongest) return
-          const questTitle = `План на 3 дня: усилить ${METRICS.find((m) => m.id === strongest.from)?.labelRu ?? strongest.from}`
-          await addQuest({
-            createdAt: Date.now(),
-            title: questTitle,
-            metricTarget: strongest.from,
-            delta: 1,
-            horizonDays: 3,
-            status: 'active',
-            predictedIndexLift: Math.max(0.3, indexDelta),
-          })
-          setPlanSummary(`Миссия создана: ${questTitle}. Ожидаемый Δ индекса ${indexDelta > 0 ? '+' : ''}${formatNumber(indexDelta)}. Главные драйверы: ${drivers.slice(0, 2).map((driver) => METRICS.find((m) => m.id === driver.from)?.labelRu ?? driver.from).join(', ')}.`)
-          await onQuestChange()
-        }}>Принять план на 3 дня</button>
-        {planSummary ? <p className="chip">{planSummary}</p> : null}
-      </article>
-    </div>
+    <article className="summary-card panel"><h2>Результат</h2><p>Новый индекс: <strong>{formatNumber(scenarioIndex)}</strong></p><p>Δ индекса: <strong>{indexDelta > 0 ? '+' : ''}{formatNumber(indexDelta)}</strong></p><ol>{propagation.map((vector, idx) => <li key={idx}>Шаг {idx + 1}: {METRICS.map((m) => `${m.labelRu} ${formatNumber(vector[m.id])}`).join(' | ')}</li>)}</ol>
+      <button type="button" onClick={async () => {
+        const strongest = drivers[0]
+        if (!strongest) return
+        const questTitle = `План на 3 дня: усилить ${METRICS.find((m) => m.id === strongest.from)?.labelRu ?? strongest.from}`
+        await addQuest({ createdAt: Date.now(), title: questTitle, metricTarget: strongest.from, delta: 1, horizonDays: 3, status: 'active', predictedIndexLift: Math.max(0.3, indexDelta) })
+        setPlanSummary(`Миссия создана: ${questTitle}. Источник весов: ${weightsSource}.`) ; await onQuestChange()
+      }}>Принять план на 3 дня</button>{planSummary ? <p className="chip">{planSummary}</p> : null}</article></div>
 
-    <div className="oracle-grid">
-      <article className="summary-card panel">
-        <h2>Почему так</h2>
-        <ul>{drivers.map((driver) => <li key={`${driver.from}-${driver.to}`}>{driver.text} ({formatNumber(driver.strength)})</li>)}</ul>
-      </article>
-
-      <article className="summary-card panel">
-        <h2>Плейбук</h2>
-        <ol>{playbook.map((item) => <li key={item}>{item}</li>)}</ol>
-      </article>
-
-      <article className="summary-card panel">
-        <h2>Сравнение базы и сценария</h2>
-        <table className="table table--dense"><thead><tr><th>Метрика</th><th>База</th><th>Сценарий</th><th>Δ</th></tr></thead>
-          <tbody>{METRICS.map((metric) => {
-            const b = baseline[metric.id]
-            const s = result[metric.id]
-            return <tr key={metric.id}><td>{metric.labelRu}</td><td>{formatNumber(b)}</td><td>{formatNumber(s)}</td><td>{s - b > 0 ? '+' : ''}{formatNumber(s - b)}</td></tr>
-          })}</tbody></table>
-      </article>
-    </div>
+    <div className="oracle-grid"><article className="summary-card panel"><h2>Почему так</h2><ul>{drivers.map((driver) => <li key={`${driver.from}-${driver.to}`}>{driver.text} ({formatNumber(driver.strength)})</li>)}</ul></article><article className="summary-card panel"><h2>Плейбук</h2><ol>{playbook.map((item) => <li key={item}>{item}</li>)}</ol></article></div>
 
     <SparkButton type="button" onClick={async () => {
       const nameRu = window.prompt('Название сценария')
       if (!nameRu) return
-      const scenario: OracleScenario = { ts: Date.now(), nameRu, baseTs: baseline.ts, impulses, result, index: scenarioIndex }
+      const scenario: OracleScenario = { ts: Date.now(), nameRu, baseTs: baseline.ts, impulses, result, index: scenarioIndex, weightsSource, mix }
       await addScenario(scenario)
       setSaved(await listScenarios())
     }}>Сохранить сценарий</SparkButton>
 
     <h2>Сохраненные сценарии</h2>
-    <ul>{saved.map((row) => <li key={`${row.ts}-${row.nameRu}`}>{row.nameRu}: {formatNumber(row.index)}</li>)}</ul>
+    <ul>{saved.map((row) => <li key={`${row.ts}-${row.nameRu}`}>{row.nameRu}: {formatNumber(row.index)} · {row.weightsSource} · mix {row.mix.toFixed(2)}</li>)}</ul>
   </section>
 }
