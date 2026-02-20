@@ -75,6 +75,27 @@ export interface HedgeSuggestion {
   noteRu: string
 }
 
+export type MultiverseBranchId = 'gold' | 'grey' | 'abyss'
+
+export interface BranchSnapshot {
+  id: MultiverseBranchId
+  nameRu: string
+  probability: number
+  expectedIndex: number[]
+  expectedPCollapse: number[]
+  goalScoreEnd: number
+  goalScoreDelta: number
+  tailRiskChip: string
+  topDrivers: string[]
+}
+
+export interface ActionLever {
+  metricId: MetricId
+  titleRu: string
+  delta: number
+  reasonRu: string
+}
+
 export interface MultiverseRunResult {
   generatedAt: number
   config: MultiverseConfig
@@ -109,6 +130,8 @@ export interface MultiverseRunResult {
     next1: Record<number, number>
     next3: Record<number, number>
   }
+  branches: BranchSnapshot[]
+  actionLevers: ActionLever[]
 }
 
 export interface RunMultiverseDeps {

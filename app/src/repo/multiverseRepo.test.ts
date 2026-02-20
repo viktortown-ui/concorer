@@ -10,10 +10,18 @@ describe('multiverseRepo', () => {
     await clearAllData()
   })
 
-  it('сохраняет и читает multiverseRuns', async () => {
-    const { saveMultiverseRun, getLastMultiverseRun } = await import('./multiverseRepo')
+  it('делает roundtrip для сценариев, настроек и прогонов', async () => {
+    const { saveScenario, listScenarios, saveSettings, getSettings, saveRun, getLastRun } = await import('./multiverseRepo')
 
-    await saveMultiverseRun({
+    const scenario = await saveScenario({ nameRu: 'Тестовый контур', impulses: { energy: 0.7 }, baselineTs: Date.now() })
+    const allScenarios = await listScenarios()
+    expect(allScenarios[0]?.id).toBe(scenario.id)
+
+    await saveSettings({ horizonDays: 14, sims: 5000, seed: 42, weightsSource: 'mixed', mix: 0.4, useShockProfile: true })
+    const settings = await getSettings()
+    expect(settings?.value.mix).toBe(0.4)
+
+    await saveRun({
       ts: Date.now(),
       config: {
         horizonDays: 7,
@@ -46,17 +54,13 @@ describe('multiverseRepo', () => {
         var5Collapse: 0.3,
         cvar5Collapse: 0.4,
       },
-      quantiles: {
-        days: [1],
-        index: { p10: [1], p50: [2], p90: [3] },
-        pCollapse: { p10: [0.1], p50: [0.2], p90: [0.3] },
-      },
+      quantiles: { days: [1], index: { p10: [1], p50: [2], p90: [3] }, pCollapse: { p10: [0.1], p50: [0.2], p90: [0.3] } },
       samplePaths: [[]],
       audit: { weightsSource: 'manual', mix: 0 },
+      branches: [],
     })
 
-    const last = await getLastMultiverseRun()
-    expect(last).toBeDefined()
+    const last = await getLastRun()
     expect(last?.summary.redSirenAny).toBe(0.1)
   })
 })

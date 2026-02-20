@@ -70,6 +70,14 @@ describe('multiverse simulator', () => {
     })
   })
 
+
+
+  it('ветки нормализованы по вероятности', () => {
+    const result = runMultiverse(buildConfig(42))
+    const total = result.branches.reduce((acc, branch) => acc + branch.probability, 0)
+    expect(total).toBeCloseTo(1, 3)
+  })
+
   it('позитивный импульс не ухудшает ожидаемый индекс в синтетике', () => {
     const config = buildConfig(10)
     const baseline = runMultiverse({ ...config, plan: { nameRu: 'Ноль', impulses: [] } })

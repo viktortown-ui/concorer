@@ -8,7 +8,7 @@ import type { LearnedMatrixRecord } from './learnedMatrix'
 import type { ForecastRunRecord } from '../../repo/forecastRepo'
 import type { RegimeSnapshotRecord } from '../models/regime'
 import type { GoalEventRecord, GoalRecord } from '../models/goal'
-import type { MultiverseRunRecord } from '../../repo/multiverseRepo'
+import type { MultiverseRunRecord, MultiverseScenarioRecord, MultiverseSettingsRecord } from '../../repo/multiverseRepo'
 import type { BlackSwanRunRecord, BlackSwanScenarioRecord } from '../../repo/blackSwanRepo'
 
 export interface AppSettingRecord {
@@ -21,7 +21,7 @@ export interface OracleScenarioRecord extends OracleScenario {
   id?: number
 }
 
-export const schemaVersion = 11
+export const schemaVersion = 12
 
 class GamnoDb extends Dexie {
   checkins!: EntityTable<CheckinRecord, 'id'>
@@ -36,7 +36,9 @@ class GamnoDb extends Dexie {
   regimeSnapshots!: EntityTable<RegimeSnapshotRecord, 'id'>
   goals!: EntityTable<GoalRecord, 'id'>
   goalEvents!: EntityTable<GoalEventRecord, 'id'>
+  multiverseScenarios!: EntityTable<MultiverseScenarioRecord, 'id'>
   multiverseRuns!: EntityTable<MultiverseRunRecord, 'id'>
+  multiverseSettings!: EntityTable<MultiverseSettingsRecord, 'key'>
   blackSwanScenarios!: EntityTable<BlackSwanScenarioRecord, 'id'>
   blackSwanRuns!: EntityTable<BlackSwanRunRecord, 'id'>
   socialInsights!: EntityTable<SocialInsightRecord, 'id'>
@@ -73,7 +75,9 @@ class GamnoDb extends Dexie {
       regimeSnapshots: '++id,ts,dayKey,regimeId,sirenLevel',
       goals: '++id,createdAt,updatedAt,status',
       goalEvents: '++id,ts,goalId',
+      multiverseScenarios: '++id,updatedAt,nameRu',
       multiverseRuns: '++id,ts',
+      multiverseSettings: '&key,updatedAt',
       blackSwanScenarios: '++id,updatedAt,name',
       blackSwanRuns: '++id,ts,baseId',
       socialInsights: '++id,computedAt,windowDays,maxLag',

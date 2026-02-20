@@ -243,6 +243,15 @@ export function OraclePage({ latest, onQuestChange }: { latest?: CheckinRecord; 
       >
         Проверить на хвостовой риск
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          window.localStorage.setItem('gamno.multiverseDraft', JSON.stringify({ baselineTs, impulses, focusMetrics, sourceLabelRu: 'Черновик из Оракула', weightsSource, mix }))
+          navigate('/multiverse')
+        }}
+      >
+        Открыть в Мультивселенной
+      </button>
     </div>
     <div className="filters graph-filters"><span>Источник весов:</span>
       <button type="button" className={weightsSource === 'manual' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => setWeightsSource('manual')}>Manual</button>

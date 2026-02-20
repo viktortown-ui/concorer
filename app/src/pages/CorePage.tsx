@@ -301,6 +301,10 @@ export function CorePage({
           <ul>{sirenActions.map((action) => <li key={action.what}><strong>Что сделать:</strong> {action.what}<br /><strong>Почему:</strong> {action.why}<br /><strong>Эффект:</strong> {action.effect}</li>)}</ul>
           {negativeTriggers.length ? <><h3>Вероятные триггеры</h3><ul>{negativeTriggers.map((item) => <li key={item.key}>{item.key} · через {item.lag} дня</li>)}</ul></> : null}
           <button type="button" disabled={!sirenActions[0]} onClick={async () => { if (!sirenActions[0]) return; await addQuest({ createdAt: Date.now(), title: `Сирена: ${sirenActions[0].what}`, metricTarget: 'stress', delta: -1, horizonDays: 2, status: 'active', predictedIndexLift: 0.8 }); await onQuestChange() }}>Принять действие</button>
+          <button type="button" onClick={() => {
+            window.localStorage.setItem('gamno.multiverseDraft', JSON.stringify({ impulses: { stress: -1, sleepHours: 0.5 }, focusMetrics: ['stress', 'sleepHours', 'energy'], sourceLabelRu: 'Сирена → Мультивселенная' }))
+            navigate('/multiverse')
+          }}>Открыть в Мультивселенной</button>
         </section>
       ) : null}
 

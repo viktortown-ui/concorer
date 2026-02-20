@@ -137,6 +137,7 @@ export function GraphPage() {
 
   return <section className="page panel graph-page">
     <h1>Граф влияний</h1>
+    <div className="settings-actions"><button type="button" onClick={() => { window.localStorage.setItem('gamno.multiverseDraft', JSON.stringify({ impulses: { [impulseMetric]: delta }, focusMetrics: [impulseMetric], sourceLabelRu: 'Контур из Графа', weightsSource, mix })); navigate('/multiverse') }}>Открыть в Мультивселенной</button></div>
     <div className="mode-tabs">
       <button type="button" className={mode === 'levers' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => setMode('levers')}>Рычаги</button>
       <button type="button" className={mode === 'map' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => setMode('map')}>Карта</button>

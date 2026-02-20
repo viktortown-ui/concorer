@@ -5,7 +5,7 @@ import { clampMetric } from '../influence/influence'
 import type { InfluenceMatrix } from '../influence/types'
 import { computeIndexDay } from '../analytics/compute'
 import { applyBoundedPropagation, goalScoreOf, rankHedges, summarizeTail } from './scoring'
-import type { MultiverseConfig, MultiverseRunResult, PathPoint, RunMultiverseDeps } from './types'
+import type { ActionLever, MultiverseBranchId, MultiverseConfig, MultiverseRunResult, PathPoint, RunMultiverseDeps } from './types'
 
 function mulberry32(seed: number): () => number {
   let t = seed >>> 0
@@ -68,6 +68,45 @@ function shockScale(mode: MultiverseConfig['shockMode'], rand: () => number): nu
   if (mode === 'off') return 0
   if (mode === 'normal') return 1
   return rand() > 0.92 ? 3.2 : 1.2
+}
+
+
+
+function classifyBranch(point: PathPoint): MultiverseBranchId {
+  if (point.index >= 7 && point.pCollapse < 0.2) return 'gold'
+  if (point.index <= 5 || point.pCollapse >= 0.35) return 'abyss'
+  return 'grey'
+}
+
+function branchNameRu(id: MultiverseBranchId): string {
+  if (id === 'gold') return 'Золотая ветка'
+  if (id === 'abyss') return 'Бездна'
+  return 'Серая ветка'
+}
+
+function topDrivers(config: MultiverseConfig, id: MultiverseBranchId): string[] {
+  const fromPlan = config.plan.impulses.slice(0, 2).map((impulse) => {
+    const label = METRICS.find((metric) => metric.id === impulse.metricId)?.labelRu ?? impulse.metricId
+    return `Рычаг «${label}» (${impulse.delta > 0 ? '+' : ''}${impulse.delta.toFixed(1)})`
+  })
+  const runtime = [
+    config.shockMode === 'off' ? 'Шоки выключены' : config.shockMode === 'blackSwan' ? 'Усиленный шок-профиль' : 'Нормальный шок-профиль',
+    `Источник весов: ${config.weightsSource}`,
+  ]
+  const branchHint = id === 'gold' ? 'Низкая вероятность коллапса' : id === 'abyss' ? 'Доминирует риск коллапса' : 'Баланс роста и риска'
+  return [branchHint, ...fromPlan, ...runtime].slice(0, 3)
+}
+
+function buildActionLevers(config: MultiverseConfig): ActionLever[] {
+  return rankHedges(config.baseVector, config.matrix, config.indexFloor, config.collapseConstraintPct).map((hedge) => {
+    const metric = METRICS.find((item) => item.id === hedge.metricId)
+    return {
+      metricId: hedge.metricId,
+      titleRu: `Подвинуть «${metric?.labelRu ?? hedge.metricId}»`,
+      delta: hedge.delta,
+      reasonRu: hedge.noteRu,
+    }
+  })
 }
 
 function normalizeRegimeMap(paths: PathPoint[][], day: number): Record<number, number> {
@@ -160,11 +199,36 @@ export function runMultiverse(config: MultiverseConfig, deps: RunMultiverseDeps 
     }
   }
 
-  const baseGoal = goalScoreOf(config.baseVector, config.activeGoalWeights)
-  const tail = summarizeTail(paths, config.indexFloor, config.baseIndex, config.basePCollapse, baseGoal)
+  const baseGoalScore = goalScoreOf(config.baseVector, config.activeGoalWeights)
+  const tail = summarizeTail(paths, config.indexFloor, config.baseIndex, config.basePCollapse, baseGoalScore)
   const sortedByWorst = [...paths].sort((a, b) => (a.at(-1)?.index ?? 0) - (b.at(-1)?.index ?? 0))
   const representativeWorstPath = sortedByWorst[Math.floor(sortedByWorst.length * 0.05)] ?? sortedByWorst[0] ?? []
   const medianIndex = quantile(paths.map((path) => path.at(-1)?.index ?? config.baseIndex), 0.5)
+  const byBranch: Record<MultiverseBranchId, PathPoint[][]> = { gold: [], grey: [], abyss: [] }
+  for (const path of paths) {
+    const branchId = classifyBranch(path.at(-1) ?? { day: config.horizonDays, index: config.baseIndex, pCollapse: config.basePCollapse, regimeId: config.baseRegime, siren: 'green' })
+    byBranch[branchId].push(path)
+  }
+
+  const baseGoal = goalScoreOf(config.baseVector, config.activeGoalWeights) ?? 0
+  const branches = (['gold', 'grey', 'abyss'] as MultiverseBranchId[]).map((id) => {
+    const group = byBranch[id]
+    const probability = group.length / Math.max(paths.length, 1)
+    const expectedIndex = days.map((_, day) => Number((group.reduce((acc, path) => acc + (path[day]?.index ?? config.baseIndex), 0) / Math.max(group.length, 1)).toFixed(4)))
+    const expectedPCollapse = days.map((_, day) => Number((group.reduce((acc, path) => acc + (path[day]?.pCollapse ?? config.basePCollapse), 0) / Math.max(group.length, 1)).toFixed(4)))
+    const goalScoreEnd = Number((group.reduce((acc, path) => acc + (path.at(-1)?.goalScore ?? baseGoal), 0) / Math.max(group.length, 1)).toFixed(4))
+    return {
+      id,
+      nameRu: branchNameRu(id),
+      probability: Number(probability.toFixed(4)),
+      expectedIndex,
+      expectedPCollapse,
+      goalScoreEnd,
+      goalScoreDelta: Number((goalScoreEnd - baseGoal).toFixed(4)),
+      tailRiskChip: `RED ${(group.filter((path) => path.some((point) => point.siren === 'red')).length / Math.max(group.length, 1) * 100).toFixed(1)}%`,
+      topDrivers: topDrivers(config, id),
+    }
+  })
 
   return {
     generatedAt: Date.now(),
@@ -177,6 +241,7 @@ export function runMultiverse(config: MultiverseConfig, deps: RunMultiverseDeps 
     tail,
     representativeWorstPath,
     hedges: rankHedges(config.baseVector, config.matrix, config.indexFloor, config.collapseConstraintPct),
+    actionLevers: buildActionLevers(config),
     audit: {
       weightsSource: config.weightsSource,
       mix: config.mix,
@@ -195,5 +260,7 @@ export function runMultiverse(config: MultiverseConfig, deps: RunMultiverseDeps 
       next1: normalizeRegimeMap(paths, 0),
       next3: normalizeRegimeMap(paths, Math.min(2, config.horizonDays - 1)),
     },
+    branches,
   }
 }
+

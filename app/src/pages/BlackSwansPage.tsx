@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { CheckinRecord } from '../core/models/checkin'
 import { getLearnedMatrix, listCheckins, loadInfluenceMatrix } from '../core/storage/repo'
 import type { BlackSwanResult, BlackSwanScenarioSpec } from '../core/engines/blackSwan/types'
@@ -22,6 +23,7 @@ function readPrefill(): { baseTs?: number | 'latest'; weightsSource?: WeightsSou
 
 
 export function BlackSwansPage() {
+  const navigate = useNavigate()
   const [checkins, setCheckins] = useState<CheckinRecord[]>([])
   const prefill = readPrefill()
   const [baseTs, setBaseTs] = useState<number | 'latest'>(prefill?.baseTs ?? 'latest')
@@ -90,6 +92,10 @@ export function BlackSwansPage() {
 
   return <section className="page panel">
     <h1>Чёрные лебеди</h1>
+    <div className="settings-actions"><button type="button" onClick={() => {
+      window.localStorage.setItem('gamno.multiverseDraft', JSON.stringify({ baselineTs: baseTs, impulses: { stress: -0.7, sleepHours: 0.6 }, focusMetrics: ['stress', 'sleepHours', 'energy'], sourceLabelRu: 'Контур из Чёрных лебедей', weightsSource, mix }))
+      navigate('/multiverse')
+    }}>Открыть в Мультивселенной</button></div>
     <p>Стресс-тест, хвостовые риски и запас прочности для режима.</p>
     <div className="oracle-grid">
       <article className="summary-card panel"><h2>Быстрый прогон</h2>
