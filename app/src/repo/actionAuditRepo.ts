@@ -7,6 +7,20 @@ export interface ActionAuditCandidateCompact {
   penalty: number
 }
 
+export interface HorizonAuditSummaryRecord {
+  horizonDays: 3 | 7
+  policyMode: 'risk' | 'balanced' | 'growth'
+  actionId: string
+  stats: {
+    mean: number
+    p10: number
+    p50: number
+    p90: number
+    tail: number
+    failRate: number
+  }
+}
+
 export interface ActionAuditRecord {
   id?: number
   ts: number
@@ -15,6 +29,7 @@ export interface ActionAuditRecord {
   seed: number
   reproToken: ReproToken
   topCandidates: ActionAuditCandidateCompact[]
+  horizonSummary?: HorizonAuditSummaryRecord[]
   whyTopRu: string[]
   modelHealth: Record<string, unknown>
 }

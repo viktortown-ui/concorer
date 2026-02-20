@@ -14,6 +14,7 @@ import { buildUnifiedActionCatalog } from '../../actions/catalog'
 import { penaltyScore } from '../../actions/costModel'
 import type { ActionBudgetEnvelope, ActionContext, ActionCostWeights } from '../../actions/types'
 import { saveActionAudit } from '../../../repo/actionAuditRepo'
+import type { HorizonCandidateResult, HorizonSummaryCompact, PolicyHorizonWorkerInput, PolicyHorizonWorkerOutput } from './policyHorizon.types'
 
 export type PolicyMode = 'risk' | 'balanced' | 'growth'
 
@@ -80,6 +81,11 @@ export interface PolicyAudit {
   mix: number
   tailRiskRunTs?: number
   forecastConfidence: 'низкая' | 'средняя' | 'высокая'
+}
+
+export interface PolicyHorizonResult {
+  byHorizon: PolicyHorizonWorkerOutput['byHorizon']
+  bestByPolicy: PolicyHorizonWorkerOutput['bestByPolicy']
 }
 
 const MODE_WEIGHTS: Record<PolicyMode, { goal: number; index: number; risk: number; debt: number; tail: number; siren: number }> = {
@@ -320,10 +326,41 @@ export function evaluatePolicies(params: {
   return modeResults
 }
 
-function modeBudgetRisk(sirenLevel: number): number {
+export function modeBudgetRisk(sirenLevel: number): number {
   if (sirenLevel >= 1) return 0.03
   if (sirenLevel >= 0.6) return 0.05
   return 0.12
+}
+
+function createPolicyHorizonWorker(): Worker {
+  return new Worker(new URL('./policyHorizon.worker.ts', import.meta.url), { type: 'module' })
+}
+
+export function evaluatePoliciesWithAuditHorizon(params: {
+  state: PolicyStateVector
+  constraints: PolicyConstraints
+  seed: number
+  topK?: number
+}): Promise<PolicyHorizonResult> {
+  return new Promise((resolve, reject) => {
+    const worker = createPolicyHorizonWorker()
+    worker.onmessage = (event: MessageEvent<{ type: 'done'; result: PolicyHorizonWorkerOutput } | { type: 'error'; message: string }>) => {
+      if (event.data.type === 'error') {
+        worker.terminate()
+        reject(new Error(event.data.message))
+        return
+      }
+      worker.terminate()
+      resolve(event.data.result)
+    }
+    const input: PolicyHorizonWorkerInput = {
+      state: params.state,
+      constraints: params.constraints,
+      seed: params.seed,
+      topK: params.topK ?? 5,
+    }
+    worker.postMessage({ type: 'run', input })
+  })
 }
 
 export async function evaluatePoliciesWithAudit(params: {
@@ -340,6 +377,19 @@ export async function evaluatePoliciesWithAudit(params: {
   const stateHash = buildStateHash(toActionState(params.state))
   const topCandidates = selected.ranked.slice(0, 5).map((item) => ({ actionId: item.action.id, score: item.score, penalty: Number(item.penalty ?? 0) }))
   const catalogHash = buildCatalogHash(actions)
+  const horizon = await evaluatePoliciesWithAuditHorizon({ state: params.state, constraints: params.constraints, seed: params.seed, topK: 5 })
+  const horizonSummary = (Object.keys(horizon.byHorizon) as Array<'3' | '7'>).flatMap((horizonKey) => {
+    const horizonDays = Number(horizonKey) as 3 | 7
+    const byMode = horizon.byHorizon[horizonDays]
+    return (Object.entries(byMode) as Array<[PolicyMode, HorizonCandidateResult[]]>).flatMap(([policyMode, candidates]) =>
+      candidates.slice(0, 3).map((candidate) => ({
+        horizonDays,
+        policyMode,
+        actionId: candidate.actionId,
+        stats: candidate.summary as HorizonSummaryCompact,
+      })),
+    )
+  })
 
   if (selected) {
     await saveActionAudit({
@@ -355,6 +405,7 @@ export async function evaluatePoliciesWithAudit(params: {
         policyVersion: params.policyVersion,
       },
       topCandidates,
+      horizonSummary,
       whyTopRu: buildWhyTopRu(selected.best.reasonsRu),
       modelHealth: { placeholder: true },
     })
