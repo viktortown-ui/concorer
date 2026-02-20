@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import 'fake-indexeddb/auto'
 import { buildActionLibrary, buildStateVector, evaluatePolicies, evaluatePoliciesWithAudit, type PolicyConstraints } from './index'
+import { evaluatePolicyHorizonInWorker } from './policyHorizon.worker'
 import type { CheckinRecord } from '../../models/checkin'
 
 ;(globalThis as unknown as { self: typeof globalThis }).self = globalThis
@@ -71,11 +72,63 @@ describe('policy engine', () => {
     expect(result[0].best.action.id).toContain('risk:hold')
   })
 
+
+  it('engine uses worker horizon API and extends audit summary', async () => {
+    const state = buildStateVector({ latestCheckin: checkin, checkins: [checkin], activeGoal: null })
+    const created: string[] = []
+
+    class FakeWorker {
+      onmessage: ((event: MessageEvent<{ type: 'done'; result: ReturnType<typeof evaluatePolicyHorizonInWorker> }>) => void) | null = null
+      constructor(url: URL) {
+        created.push(String(url))
+      }
+      postMessage(message: { type: 'run'; input: Parameters<typeof evaluatePolicyHorizonInWorker>[0] }) {
+        const result = evaluatePolicyHorizonInWorker(message.input)
+        this.onmessage?.({ data: { type: 'done', result } } as MessageEvent<{ type: 'done'; result: typeof result }>)
+      }
+      terminate() {}
+    }
+
+    const originalWorker = globalThis.Worker
+    ;(globalThis as unknown as { Worker: typeof Worker }).Worker = FakeWorker as unknown as typeof Worker
+
+    const params = { state, constraints, mode: 'balanced' as const, seed: 19, buildId: 'test', policyVersion: '2.0-01-pr2' }
+    await evaluatePoliciesWithAudit(params)
+
+    ;(globalThis as unknown as { Worker: typeof Worker | undefined }).Worker = originalWorker
+
+    expect(created.length).toBeGreaterThan(0)
+    expect(created[0]).toContain('policyHorizon.worker.ts')
+
+    const { getLastActionAudit } = await import('../../../repo/actionAuditRepo')
+    const last = await getLastActionAudit()
+    expect(last?.horizonSummary?.length).toBeGreaterThan(0)
+    expect(last?.horizonSummary?.[0].stats).toHaveProperty('p50')
+  })
   it('fixed seed+state gives same choice and writes audit', async () => {
     const state = buildStateVector({ latestCheckin: checkin, checkins: [checkin], activeGoal: null })
+
+    class FakeWorker {
+      onmessage: ((event: MessageEvent<{ type: 'done'; result: ReturnType<typeof evaluatePolicyHorizonInWorker> }>) => void) | null = null
+      constructor(url: URL) {
+        void url
+      }
+      postMessage(message: { type: 'run'; input: Parameters<typeof evaluatePolicyHorizonInWorker>[0] }) {
+        const result = evaluatePolicyHorizonInWorker(message.input)
+        this.onmessage?.({ data: { type: 'done', result } } as MessageEvent<{ type: 'done'; result: typeof result }>)
+      }
+      terminate() {}
+    }
+
+    const originalWorker = globalThis.Worker
+    ;(globalThis as unknown as { Worker: typeof Worker }).Worker = FakeWorker as unknown as typeof Worker
+
     const params = { state, constraints, mode: 'balanced' as const, seed: 7, buildId: 'test', policyVersion: '2.0-01-pr1' }
     const first = await evaluatePoliciesWithAudit(params)
     const second = await evaluatePoliciesWithAudit(params)
+
+    ;(globalThis as unknown as { Worker: typeof Worker | undefined }).Worker = originalWorker
+
     const firstBest = first.find((item) => item.mode === 'balanced')?.best.action.id
     const secondBest = second.find((item) => item.mode === 'balanced')?.best.action.id
     expect(firstBest).toBe(secondBest)
