@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { METRICS } from '../core/metrics'
 import type { GoalRecord } from '../core/models/goal'
 import {
@@ -30,6 +31,7 @@ const defaultGoal: Omit<GoalRecord, 'id' | 'createdAt' | 'updatedAt'> = {
 }
 
 export function GoalsPage() {
+  const navigate = useNavigate()
   const [goals, setGoals] = useState<GoalRecord[]>([])
   const [selectedGoalId, setSelectedGoalId] = useState<number | null>(null)
   const [editor, setEditor] = useState<GoalRecord | null>(null)
@@ -138,6 +140,12 @@ export function GoalsPage() {
   return (
     <section className="page">
       <h1>Цели</h1>
+      <div className="settings-actions"><button type="button" onClick={() => {
+        const focus = Object.entries(selected?.weights ?? {}).sort((a, b) => Math.abs((b[1] ?? 0)) - Math.abs((a[1] ?? 0))).slice(0, 3)
+        const impulses = Object.fromEntries(focus.map(([metricId, w]) => [metricId, (w ?? 0) > 0 ? 0.5 : -0.5]))
+        window.localStorage.setItem('gamno.multiverseDraft', JSON.stringify({ impulses, focusMetrics: focus.map(([metricId]) => metricId), sourceLabelRu: 'Цель → Мультивселенная' }))
+        navigate('/multiverse')
+      }}>Открыть в Мультивселенной</button></div>
       <div className="oracle-grid goals-layout">
         <article className="summary-card panel">
           <h2>Список целей</h2>
