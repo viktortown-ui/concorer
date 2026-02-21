@@ -26,22 +26,27 @@ import { computeAndSaveFrame, getLastFrame, type FrameSnapshotRecord } from './r
 
 type PageKey = 'start' | 'world' | 'core' | 'dashboard' | 'oracle' | 'autopilot' | 'antifragility' | 'multiverse' | 'time-debt' | 'social-radar' | 'black-swans' | 'goals' | 'graph' | 'history' | 'settings' | 'system'
 
-const pageMeta: { key: PageKey; label: string; icon?: string }[] = [
-  { key: 'world', label: 'Мир', icon: '◉' },
-  { key: 'start', label: 'Помощь', icon: '?' },
-  { key: 'core', label: 'Живое ядро' },
-  { key: 'dashboard', label: 'Дашборд' },
-  { key: 'oracle', label: 'Оракул' },
-  { key: 'autopilot', label: 'Автопилот' },
-  { key: 'antifragility', label: 'Антихрупкость' },
-  { key: 'multiverse', label: 'Мультивселенная' },
-  { key: 'time-debt', label: 'Долг' },
-  { key: 'social-radar', label: 'Социальный радар' },
-  { key: 'black-swans', label: 'Чёрные лебеди' },
-  { key: 'goals', label: 'Цели' },
-  { key: 'graph', label: 'Граф' },
-  { key: 'history', label: 'История' },
-  { key: 'settings', label: 'Настройки' },
+type NavItem = { key: PageKey; label: string; icon: string }
+
+const primaryNavItems: NavItem[] = [
+  { key: 'world', label: 'Мир', icon: '🧭' },
+  { key: 'start', label: 'Помощь', icon: '❓' },
+  { key: 'core', label: 'Живое ядро', icon: '💓' },
+  { key: 'dashboard', label: 'Дашборд', icon: '📊' },
+  { key: 'oracle', label: 'Оракул', icon: '🔮' },
+  { key: 'goals', label: 'Цели', icon: '🎯' },
+  { key: 'history', label: 'История', icon: '🕘' },
+]
+
+const secondaryNavItems: NavItem[] = [
+  { key: 'autopilot', label: 'Автопилот', icon: '🛫' },
+  { key: 'antifragility', label: 'Антихрупкость', icon: '🛡️' },
+  { key: 'multiverse', label: 'Мультивселенная', icon: '🪐' },
+  { key: 'time-debt', label: 'Долг', icon: '⏳' },
+  { key: 'social-radar', label: 'Социальный радар', icon: '📡' },
+  { key: 'black-swans', label: 'Чёрные лебеди', icon: '🦢' },
+  { key: 'graph', label: 'Граф', icon: '🕸️' },
+  { key: 'settings', label: 'Настройки', icon: '⚙️' },
   { key: 'system', label: 'Система', icon: '⌁' },
 ]
 
@@ -65,7 +70,8 @@ function DesktopApp() {
   const [appearance, setAppearance] = useState<AppearanceSettings>(() => loadAppearanceSettings())
   const [frame, setFrame] = useState<FrameSnapshotRecord | undefined>()
   const [hintsEnabled, setHintsEnabled] = useState(false)
-  const [navExpanded, setNavExpanded] = useState(false)
+  const [isRailCollapsed, setIsRailCollapsed] = useState(false)
+  const [isMoreOpen, setIsMoreOpen] = useState(false)
 
   const loadData = async () => {
     const [all, latest, currentQuest] = await Promise.all([listCheckins(), getLatestCheckin(), getActiveQuest()])
@@ -88,6 +94,18 @@ function DesktopApp() {
     })
     return () => { cancelled = true }
   }, [])
+
+  useEffect(() => {
+    if (!isMoreOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsMoreOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isMoreOpen])
+
   useEffect(() => {
     document.documentElement.dataset.theme = appearance.theme
     document.documentElement.dataset.motion = appearance.motion
@@ -95,29 +113,53 @@ function DesktopApp() {
     saveAppearanceSettings(appearance)
   }, [appearance])
 
-  const isWorldHomeRoute = location.pathname === '/world' || location.pathname === '/start'
-  const collapseSidebar = isWorldHomeRoute && !navExpanded
+  const collapseSidebar = isRailCollapsed
+
+  const renderNavLink = (page: NavItem) => (
+    <NavLink
+      key={page.key}
+      className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`}
+      to={`/${page.key}`}
+      title={collapseSidebar ? page.label : undefined}
+      onClick={() => setIsMoreOpen(false)}
+      data-help-target={page.key === 'world' ? 'nav-world' : page.key === 'start' ? 'nav-start' : undefined}
+    >
+      <span className="nav-link__icon" aria-hidden="true">{page.icon}</span>
+      <span className="nav-link__label">{page.label}</span>
+    </NavLink>
+  )
 
   return (
     <div className={`layout ${hintsEnabled && location.pathname === '/start' ? 'layout--hints' : ''} ${collapseSidebar ? 'layout--sidebar-collapsed' : ''}`.trim()}>
       <Starfield />
       <CommandPalette />
-      <aside className="sidebar panel">
+      <aside className="sidebar panel" data-testid="navigation-rail">
         <div className="sidebar__head">
           <h2>Gamno</h2>
-          {isWorldHomeRoute ? (
-            <button type="button" className="sidebar__toggle" onClick={() => setNavExpanded((prev) => !prev)} aria-label={collapseSidebar ? 'Показать меню' : 'Свернуть меню'}>
-              {collapseSidebar ? '☰' : '←'}
-            </button>
-          ) : null}
+          <button type="button" className="sidebar__toggle" onClick={() => setIsRailCollapsed((prev) => !prev)} aria-label={collapseSidebar ? 'Развернуть навигацию' : 'Свернуть навигацию'}>
+            {collapseSidebar ? '☰' : '←'}
+          </button>
         </div>
-        <nav>
-          {pageMeta.map((page) => (
-            <NavLink key={page.key} className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`} to={`/${page.key}`} data-help-target={page.key === 'world' ? 'nav-world' : page.key === 'start' ? 'nav-start' : undefined}>
-              <span className="nav-link__icon" aria-hidden="true">{page.icon ?? page.label[0] ?? "•"}</span>
-              <span className="nav-link__label">{page.label}</span>
-            </NavLink>
-          ))}
+        <nav role="navigation" aria-label="Навигация" tabIndex={0}>
+          {primaryNavItems.map(renderNavLink)}
+          <div className="nav-more">
+            <button
+              type="button"
+              className={`nav-link nav-link--button ${isMoreOpen ? 'nav-link--active' : ''}`}
+              onClick={() => setIsMoreOpen((prev) => !prev)}
+              aria-expanded={isMoreOpen}
+              aria-controls="rail-more-list"
+              title={collapseSidebar ? 'Ещё' : undefined}
+            >
+              <span className="nav-link__icon" aria-hidden="true">⋯</span>
+              <span className="nav-link__label">Ещё</span>
+            </button>
+            {isMoreOpen ? (
+              <div id="rail-more-list" className="nav-more__list" role="menu" aria-label="Дополнительные разделы">
+                {secondaryNavItems.map(renderNavLink)}
+              </div>
+            ) : null}
+          </div>
         </nav>
       </aside>
 
