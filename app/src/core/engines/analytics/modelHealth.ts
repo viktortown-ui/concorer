@@ -22,6 +22,16 @@ export interface DriftSummary {
   score: number
 }
 
+
+export interface TailBacktestSignal {
+  horizonDays: 3 | 7
+  policyMode: 'risk' | 'balanced' | 'growth'
+  tailExceedRate: number
+  tailLossRatio: number
+  sampleCount: number
+  warnings: string[]
+}
+
 export interface ModelHealthSnapshot {
   v: 1
   kind: ModelHealthKind
@@ -30,6 +40,11 @@ export interface ModelHealthSnapshot {
   data: { samples: number; minSamples: number; sufficient: boolean }
   calibration: { brier: number; worstGap: number; bins: ReliabilityBinSummary[] }
   drift: DriftSummary
+  tailBacktest?: {
+    generatedAt: number
+    signals: TailBacktestSignal[]
+    warnings: string[]
+  }
 }
 
 function clamp01(value: number): number {

@@ -6,6 +6,7 @@ import { getLastBlackSwanRun } from '../repo/blackSwanRepo'
 import { getLastRun as getLastMultiverseRun } from '../repo/multiverseRepo'
 import { useEffect, useState } from 'react'
 import { evaluateModelHealth, type ModelHealthSnapshot } from '../core/engines/analytics/modelHealth'
+import { createTailBacktestWorker, runTailBacktestInWorker, type TailBacktestWorkerMessage } from '../core/workers/tailBacktestClient'
 import { CalibrationTrustCard } from '../ui/components/CalibrationTrust'
 
 interface SystemStats {
@@ -16,13 +17,25 @@ interface SystemStats {
   counts: Record<string, number>
   health: { learned: ModelHealthSnapshot; forecast: ModelHealthSnapshot; policy: ModelHealthSnapshot } | null
   safeModeTriggers: Array<{ ts: number; chosenActionId: string; gatesApplied: string[]; reasonsRu: string[]; fallbackPolicy?: string }>
-  tailRiskPanel: Array<{ source: 'BlackSwans' | 'Multiverse' | 'Autopilot'; es: number; varValue: number; tailMass: number; failRate?: number }>
+  tailRiskPanel: Array<{ source: 'BlackSwans' | 'Multiverse' | 'Autopilot' | 'Tail-Backtest'; es: number; varValue: number; tailMass: number; failRate?: number; note?: string }>
+}
+
+function resolveTailBacktest(worker: Worker, payload: Parameters<typeof runTailBacktestInWorker>[1]): Promise<Extract<TailBacktestWorkerMessage, { type: 'done' }>['result']> {
+  return new Promise((resolve, reject) => {
+    worker.onmessage = (event: MessageEvent<TailBacktestWorkerMessage>) => {
+      if (event.data.type === 'done') resolve(event.data.result)
+      else reject(new Error(event.data.message))
+    }
+    runTailBacktestInWorker(worker, payload)
+  })
 }
 
 export function SystemPage() {
   const [stats, setStats] = useState<SystemStats>({ counts: {}, health: null, safeModeTriggers: [], tailRiskPanel: [] })
 
   useEffect(() => {
+    const worker = createTailBacktestWorker(() => undefined)
+
     void Promise.all([
       getLastFrame(),
       getLatestForecastRun(),
@@ -34,8 +47,9 @@ export function SystemPage() {
       db.multiverseRuns.count(),
       db.learnedMatrices.toArray(),
       db.forecastRuns.orderBy('ts').reverse().limit(12).toArray(),
-      db.actionAudits.orderBy('ts').reverse().limit(24).toArray(),
-    ]).then(([frame, forecast, blackSwan, multiverse, checkins, events, frames, runs, matrices, forecasts, audits]) => {
+      db.actionAudits.orderBy('ts').reverse().limit(36).toArray(),
+      db.frameSnapshots.orderBy('ts').toArray(),
+    ]).then(async ([frame, forecast, blackSwan, multiverse, checkins, events, frames, runs, matrices, forecasts, audits, frameSeries]) => {
       const learnedCalibration = matrices.map((item) => {
         const trained = Math.min(1, item.trainedOnDays / 60)
         const lagPenalty = Math.min(0.3, Math.abs(item.lags - 2) * 0.08)
@@ -66,11 +80,45 @@ export function SystemPage() {
         return { probability, outcome: (grade === 'red' ? 0 : 1) as 0 | 1 }
       })
       const policyDrift = audits.map((audit) => Number((audit.horizonSummary?.[0]?.stats.failRate ?? 0).toFixed(4)))
+      const basePolicyHealth = policyHealthFromAudit ?? evaluateModelHealth({ kind: 'policy', calibration: policyCalibration, driftSeries: policyDrift, minSamples: 6 })
+
+      const tailBacktest = await resolveTailBacktest(worker, {
+        audits: audits.map((audit) => ({ ts: audit.ts, horizonSummary: audit.horizonSummary })),
+        frames: frameSeries.map((item) => ({ ts: item.ts, payload: item.payload })),
+        minSamples: 5,
+      }).catch(() => ({ points: [], aggregates: [], warnings: ['Tail backtest worker error.'] }))
+
+      const tailSignals = tailBacktest.aggregates
+        .slice()
+        .sort((a, b) => (a.horizonDays - b.horizonDays) || a.policyMode.localeCompare(b.policyMode))
+        .map((item) => ({
+          horizonDays: item.horizonDays,
+          policyMode: item.policyMode,
+          tailExceedRate: item.tailExceedRate,
+          tailLossRatio: item.tailLossRatio,
+          sampleCount: item.sampleCount,
+          warnings: item.warnings,
+        }))
+
+      const policyHealth: ModelHealthSnapshot = {
+        ...basePolicyHealth,
+        tailBacktest: {
+          generatedAt: Date.now(),
+          signals: tailSignals,
+          warnings: tailBacktest.warnings,
+        },
+        reasonsRu: [
+          ...basePolicyHealth.reasonsRu,
+          tailSignals.length
+            ? `Tail-Backtest: ${tailSignals[0].policyMode}/H${tailSignals[0].horizonDays} exceed ${(tailSignals[0].tailExceedRate * 100).toFixed(1)}%, ratio ${tailSignals[0].tailLossRatio.toFixed(2)}.`
+            : 'Tail-Backtest: недостаточно данных.',
+        ],
+      }
 
       const health = {
         learned: evaluateModelHealth({ kind: 'learned', calibration: learnedCalibration, driftSeries: learnedDrift, minSamples: 3 }),
         forecast: evaluateModelHealth({ kind: 'forecast', calibration: forecastCalibration, driftSeries: forecastDrift, minSamples: 8 }),
-        policy: policyHealthFromAudit ?? evaluateModelHealth({ kind: 'policy', calibration: policyCalibration, driftSeries: policyDrift, minSamples: 6 }),
+        policy: policyHealth,
       }
 
       const safeModeTriggers = audits
@@ -85,6 +133,8 @@ export function SystemPage() {
         }))
 
       const autopilotTail = audits[0]?.horizonSummary?.slice().sort((a, b) => (a.horizonDays - b.horizonDays) || a.policyMode.localeCompare(b.policyMode) || a.actionId.localeCompare(b.actionId))[0]
+      const topTailSignal = tailSignals[0]
+
       const tailRiskPanel: SystemStats['tailRiskPanel'] = [
         {
           source: 'BlackSwans',
@@ -105,9 +155,20 @@ export function SystemPage() {
           tailMass: autopilotTail?.stats.tailMass ?? 0,
           failRate: autopilotTail?.stats.failRate,
         },
+        {
+          source: 'Tail-Backtest',
+          es: topTailSignal?.tailLossRatio ?? 0,
+          varValue: topTailSignal?.tailExceedRate ?? 0,
+          tailMass: Math.min(1, (topTailSignal?.sampleCount ?? 0) / 10),
+          note: topTailSignal ? `${topTailSignal.policyMode}/H${topTailSignal.horizonDays}` : 'нет данных',
+        },
       ]
       setStats({ frameTs: frame?.ts, forecastTs: forecast?.ts, blackSwanTs: blackSwan?.ts, multiverseTs: multiverse?.ts, counts: { checkins, events, frames, runs }, health, safeModeTriggers, tailRiskPanel })
     })
+
+    return () => {
+      worker.terminate()
+    }
   }, [])
 
   return (
@@ -136,6 +197,7 @@ export function SystemPage() {
               <li key={item.source}>
                 <strong>{item.source}</strong>: ES {item.es.toFixed(4)} · VaR {item.varValue.toFixed(4)} · tailMass {(item.tailMass * 100).toFixed(1)}%
                 {typeof item.failRate === 'number' ? ` · failRate ${(item.failRate * 100).toFixed(1)}%` : ''}
+                {item.note ? ` · ${item.note}` : ''}
               </li>
             ))}
           </ul>
