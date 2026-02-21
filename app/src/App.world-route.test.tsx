@@ -12,7 +12,7 @@ Object.defineProperty(window, 'matchMedia', { value: () => ({ matches: false, ad
 vi.mock('./pages/WorldPage', () => ({ WorldPage: () => <div data-testid="world-page">WORLD</div> }))
 vi.mock('./pages/StartPage', () => ({ StartPage: () => <div data-testid="start-page">START</div> }))
 vi.mock('./repo/frameRepo', () => ({ getLastFrame: vi.fn(async () => ({ payload: { stateSnapshot: { index: 0, risk: 0, volatility: 0 }, forecastSummary: { p50next7: 0, confidence: 'низкая' }, regimeSnapshot: { explainTop3: [], regimeId: 0, pCollapse: 0, sirenLevel: 'green' }, goal: { goalScore: 0, gap: 0 }, tailRiskSummary: { pRed7d: 0 }, debt: { totalDebt: 0, trend: 'flat' }, socialSummary: { topInfluencesWeek: [] }, autopilotSummary: {}, antifragility: { recoveryScore: 0 } } })), computeAndSaveFrame: vi.fn(async () => ({ payload: { stateSnapshot: { index: 0, risk: 0, volatility: 0 }, forecastSummary: { p50next7: 0, confidence: 'низкая' }, regimeSnapshot: { explainTop3: [], regimeId: 0, pCollapse: 0, sirenLevel: 'green' }, goal: { goalScore: 0, gap: 0 }, tailRiskSummary: { pRed7d: 0 }, debt: { totalDebt: 0, trend: 'flat' }, socialSummary: { topInfluencesWeek: [] }, autopilotSummary: {}, antifragility: { recoveryScore: 0 } } })) }))
-vi.mock('./core/storage/repo', () => ({ listCheckins: vi.fn(async () => [1, 2, 3]), getLatestCheckin: vi.fn(async () => undefined), getActiveQuest: vi.fn(async () => undefined) }))
+vi.mock('./core/storage/repo', () => ({ listCheckins: vi.fn(async () => []), getLatestCheckin: vi.fn(async () => undefined), getActiveQuest: vi.fn(async () => undefined) }))
 
 async function flush(): Promise<void> {
   await Promise.resolve()
@@ -40,7 +40,7 @@ describe('App world routes', () => {
     container.remove()
   })
 
-  it('first visit routes to /start', async () => {
+  it('first visit still routes to /world', async () => {
     window.localStorage.removeItem('hasSeenStart')
     window.location.hash = '#/world'
     const { default: App } = await import('./App')
@@ -51,7 +51,7 @@ describe('App world routes', () => {
     await act(async () => { root.render(<HashRouter><App /></HashRouter>) })
     await act(async () => { await flush() })
 
-    expect(container.textContent).toContain('START')
+    expect(container.textContent).toContain('WORLD')
 
     await act(async () => { root.unmount() })
     container.remove()

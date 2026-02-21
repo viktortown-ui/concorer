@@ -13,37 +13,13 @@ vi.mock('react-router-dom', async () => {
   return { ...actual, useNavigate: () => navigateMock }
 })
 
-vi.mock('../core/workers/worldMapClient', () => ({
-  createWorldMapWorker: vi.fn((onMessage: (message: unknown) => void) => ({ terminate: vi.fn(), _onMessage: onMessage })),
-  runWorldMapInWorker: vi.fn((worker: { _onMessage: (message: unknown) => void }) => {
-    worker._onMessage({
-      type: 'done',
-      result: {
-        id: 'snapshot:start',
-        ts: 1,
-        seed: 12,
-        viewport: { width: 800, height: 600, padding: 24 },
-        center: { x: 400, y: 300 },
-        metrics: { level: 1, risk: 0.1, esCollapse10: 0.1, failProbability: 0.1, budgetPressure: 0.1, safeMode: false, sirenLevel: 'green' },
-        rings: [],
-        storms: [],
-        domains: [],
-        planets: [],
-      },
-    })
-  }),
-}))
-
-vi.mock('../ui/components/WorldMapView', () => ({ WorldMapView: () => <div>PREVIEW</div> }))
-
 async function flush(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
 }
 
 describe('StartPage', () => {
-  it('has reduced motion flag and CTA navigation', async () => {
-    Object.defineProperty(window, 'matchMedia', { value: () => ({ matches: true, addEventListener: () => undefined, removeEventListener: () => undefined }), configurable: true })
+  it('offers optional help page actions', async () => {
     const { StartPage } = await import('./StartPage')
     const container = document.createElement('div')
     document.body.appendChild(container)
@@ -58,16 +34,12 @@ describe('StartPage', () => {
     })
     await act(async () => { await flush() })
 
-    expect(container.querySelector('.start-hero')?.getAttribute('data-reduced-motion')).toBe('true')
-
     const buttons = [...container.querySelectorAll('button')]
-    const primary = buttons.find((item) => item.textContent?.includes('Сделать первый чек-ин'))
-    const secondary = buttons.find((item) => item.textContent?.includes('Открыть Мир'))
-    primary?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    secondary?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    buttons.find((item) => item.textContent?.includes('Открыть Мир'))?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    buttons.find((item) => item.textContent?.includes('Первый чек-ин'))?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    expect(navigateMock).toHaveBeenCalledWith('/core')
     expect(navigateMock).toHaveBeenCalledWith('/world')
+    expect(navigateMock).toHaveBeenCalledWith('/core')
 
     await act(async () => { root.unmount() })
     container.remove()

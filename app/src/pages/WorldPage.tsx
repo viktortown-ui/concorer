@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { db } from '../core/storage/db'
 import { buildUnifiedActionCatalog } from '../core/actions/catalog'
 import type { ActionDomain } from '../core/actions/types'
@@ -50,6 +51,7 @@ function setHashPlanetId(planetId: string | null): void {
 }
 
 export function WorldPage() {
+  const navigate = useNavigate()
   const [worldMapSnapshot, setWorldMapSnapshot] = useState<WorldMapSnapshot | null>(null)
   const [frames, setFrames] = useState<Array<{ ts: number; payload: FrameSnapshot }>>([])
   const [timelineIndex, setTimelineIndex] = useState(0)
@@ -60,6 +62,7 @@ export function WorldPage() {
   const [trustReason, setTrustReason] = useState('Нет данных.')
   const [policyMode, setPolicyMode] = useState('balanced')
   const [selectedPlanetId, setSelectedPlanetId] = useState<string | null>(() => getHashPlanetId())
+  const [lastActionReason, setLastActionReason] = useState('Сделайте первый шаг: чек-ин или автопилот.')
   const lastOriginRef = useRef<HTMLElement | null>(null)
   const prevSelectedRef = useRef<string | null>(selectedPlanetId)
 
@@ -108,6 +111,7 @@ export function WorldPage() {
       setModelTrust(lastAudit?.modelHealth?.grade ?? 'n/a')
       setTrustReason(lastAudit?.modelHealth?.reasonsRu?.[0] ?? 'Нет свежей диагностики.')
       setPolicyMode(lastAudit?.horizonSummary?.[0]?.policyMode ?? 'balanced')
+      setLastActionReason(lastAudit?.whyTopRu?.[0] ?? 'Действие пока не выбрано.')
     })
 
     return () => worldMapWorker.terminate()
@@ -151,20 +155,45 @@ export function WorldPage() {
           es97_5: item.stats.es97_5 ?? item.stats.tail,
           failRate: item.stats.failRate,
           ctaRu: action?.tags.includes('goal') ? 'Собрать миссию' : 'Сделать',
+          costRu: `~${action?.defaultCost.timeMin ?? 0} мин · E${action?.defaultCost.energy ?? 0}`,
         }
       })
   }, [horizonSummary, selectedPlanet])
 
+  const bestAction = useMemo(() => {
+    const catalog = buildUnifiedActionCatalog()
+    const actionMap = new Map(catalog.map((item) => [item.id, item]))
+    const best = horizonSummary
+      .filter((item) => item.horizonDays === 7)
+      .sort(sortLevers)[0]
+    if (!best) return null
+    return {
+      id: best.actionId,
+      titleRu: actionMap.get(best.actionId)?.titleRu ?? best.actionId,
+    }
+  }, [horizonSummary])
+
   const hudSignals = mapFrameToHudSignals({
     frame: currentFrame,
     mode: policyMode,
-    failRate: panelLevers[0]?.failRate ?? 0,
+    failRate: bestAction ? (horizonSummary.find((item) => item.actionId === bestAction.id && item.horizonDays === 7)?.stats.failRate ?? 0) : 0,
     trust: { grade: modelTrust as 'green' | 'yellow' | 'red', reasonsRu: [trustReason] },
   })
 
   const fxEvents = worldMapSnapshot
     ? buildWorldFxEvents({ current: currentFrame, previous: previousFrame, snapshot: worldMapSnapshot })
     : []
+
+  const handleNextAction = () => {
+    if (frames.length === 0 || !bestAction) {
+      setLastActionReason('Нужны исходные данные, чтобы автопилот дал надёжный шаг.')
+      navigate('/core')
+      return
+    }
+    setLastActionReason(whyTopRu[0] ?? `Лучший ход по горизонту H7: ${bestAction.titleRu}.`)
+    const firstPlanet = worldMapSnapshot?.planets[0]?.id
+    if (firstPlanet) setHashPlanetId(firstPlanet)
+  }
 
   return (
     <section className="world-page" aria-label="Кокпит мира">
@@ -173,6 +202,14 @@ export function WorldPage() {
           <span key={signal.key} role="listitem"><strong>{signal.label}</strong>: {signal.value}</span>
         ))}
       </div>
+
+      <section className="world-next-action panel" aria-label="Следующий шаг">
+        <strong>Что делать дальше?</strong>
+        <button type="button" className="start-primary" onClick={handleNextAction}>
+          {frames.length === 0 || !bestAction ? 'First check-in' : `Next Action: ${bestAction.titleRu}`}
+        </button>
+        <p className="mono">Почему: {lastActionReason}</p>
+      </section>
 
       <div className="world-stage">
         {worldMapSnapshot ? (
@@ -194,6 +231,7 @@ export function WorldPage() {
             whyBullets={whyTopRu}
             debtProtocol={debtProtocol}
             onClose={() => setHashPlanetId(null)}
+            onApplyLever={(lever) => setLastActionReason(`Запланировано: ${lever.titleRu}. Проверьте результат в аудите.`)}
           />
         ) : null}
       </div>

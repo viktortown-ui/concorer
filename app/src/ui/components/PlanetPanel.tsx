@@ -9,6 +9,7 @@ export interface PlanetLever {
   es97_5: number
   failRate: number
   ctaRu: 'Сделать' | 'Собрать миссию'
+  costRu: string
 }
 
 interface PlanetPanelProps {
@@ -17,13 +18,14 @@ interface PlanetPanelProps {
   whyBullets: string[]
   debtProtocol: string[]
   onClose: () => void
+  onApplyLever?: (lever: PlanetLever) => void
 }
 
 function pct(value: number): string {
   return `${(Math.max(0, value) * 100).toFixed(1)}%`
 }
 
-export function PlanetPanel({ planet, levers, whyBullets, debtProtocol, onClose }: PlanetPanelProps) {
+export function PlanetPanel({ planet, levers, whyBullets, debtProtocol, onClose, onApplyLever }: PlanetPanelProps) {
   const topLever = levers[0]
   const stormRows = levers.slice(0, 2)
   const p10 = stormRows.map((lever) => Math.max(0, lever.p50 - Math.abs(lever.p90 - lever.p50) * 0.75) * 100)
@@ -48,53 +50,54 @@ export function PlanetPanel({ planet, levers, whyBullets, debtProtocol, onClose 
       <div className="planet-panel__chips">
         <span className="chip">lvl {planet.metrics.level}</span>
         <span className="chip">{planet.metrics.safeMode ? 'safeMode' : `siren:${planet.metrics.sirenLevel}`}</span>
-        <span className="chip">budget {pct(planet.metrics.budgetPressure)}</span>
         <span className="chip">fail {pct(planet.metrics.failProbability)}</span>
       </div>
 
       <section>
-        <h4>Брифинг</h4>
+        <h4>Briefing</h4>
         <p>{mainThreatRu}</p>
         <p>Главный рычаг: <strong>{topLever?.titleRu ?? 'нет данных'}</strong>.</p>
-        <ul>
-          {whyBullets.slice(0, 3).map((line, index) => <li key={`why-${index}`}>{line}</li>)}
-        </ul>
       </section>
 
       <section>
-        <h4>Рычаги</h4>
+        <h4>Top actions</h4>
         <ul className="planet-panel__levers">
-          {levers.map((lever) => (
+          {levers.slice(0, 3).map((lever) => (
             <li key={lever.actionId}>
               <div>
                 <strong>{lever.titleRu}</strong>
-                <div className="mono">p50 {pct(lever.p50)} · p90 {pct(lever.p90)} · ES97.5 {pct(lever.es97_5)} · fail {pct(lever.failRate)}</div>
+                <div className="mono">{lever.costRu} · ES97.5 {pct(lever.es97_5)} · fail {pct(lever.failRate)}</div>
               </div>
-              <button type="button">{lever.ctaRu}</button>
+              <button type="button" onClick={() => onApplyLever?.(lever)}>{lever.ctaRu}</button>
             </li>
           ))}
         </ul>
       </section>
 
+      {topLever ? (
+        <section>
+          <button type="button" className="start-primary" onClick={() => onApplyLever?.(topLever)}>Do it: {topLever.titleRu}</button>
+        </section>
+      ) : null}
+
       <section>
-        <h4>Storm</h4>
-        <FanChart labels={stormRows.map((item) => `${item.titleRu} (H3/H7)`)} p10={p10} p50={p50} p90={p90} />
-        {stormRows.map((row) => (
-          <p key={`storm-${row.actionId}`} className="mono">{row.titleRu}: ES {pct(row.es97_5)} · VaR {pct(row.p90)} · fail {pct(row.failRate)}</p>
-        ))}
+        <h4>Почему</h4>
+        <ul>
+          {(whyBullets.length ? whyBullets : ['Нет объяснения.']).slice(0, 2).map((line, index) => <li key={`why-${index}`}>{line}</li>)}
+        </ul>
       </section>
+
+      {stormRows.length ? (
+        <section>
+          <h4>Tail-risk</h4>
+          <FanChart labels={stormRows.map((item) => `${item.titleRu} (H3/H7)`)} p10={p10} p50={p50} p90={p90} />
+        </section>
+      ) : null}
 
       <section>
         <h4>Pressure / Debts</h4>
-        <p>Бюджетное давление: {pct(planet.metrics.budgetPressure)}. Чем выше, тем строже лимиты по энергии/времени.</p>
-        {debtProtocol.length ? <ul>{debtProtocol.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul> : <p>Активных долгов не найдено.</p>}
+        {debtProtocol.length ? <ul>{debtProtocol.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul> : <p>Активных долгов не найдено.</p>}
       </section>
-
-      <nav className="planet-panel__links" aria-label="Быстрые ссылки">
-        <a href="#/autopilot">Автопилот</a>
-        <a href="#/system">Система</a>
-        <a href="#/history">Аудит</a>
-      </nav>
     </aside>
   )
 }
