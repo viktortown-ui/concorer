@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import type { CheckinRecord, CheckinValues } from './core/models/checkin'
 import type { QuestRecord } from './core/models/quest'
 import { getActiveQuest, getLatestCheckin, listCheckins } from './core/storage/repo'
@@ -14,7 +14,6 @@ import { MultiversePage } from './pages/MultiversePage'
 import { CommandPalette } from './ui/CommandPalette'
 import { loadAppearanceSettings, saveAppearanceSettings, type AppearanceSettings } from './ui/appearance'
 import { Starfield } from './ui/Starfield'
-import { MissionStrip } from './ui/MissionStrip'
 import { BlackSwansPage } from './pages/BlackSwansPage'
 import { SocialRadarPage } from './pages/SocialRadarPage'
 import { TimeDebtPage } from './pages/TimeDebtPage'
@@ -27,9 +26,9 @@ import { computeAndSaveFrame, getLastFrame, type FrameSnapshotRecord } from './r
 
 type PageKey = 'start' | 'world' | 'core' | 'dashboard' | 'oracle' | 'autopilot' | 'antifragility' | 'multiverse' | 'time-debt' | 'social-radar' | 'black-swans' | 'goals' | 'graph' | 'history' | 'settings' | 'system'
 
-const pageMeta: { key: PageKey; label: string }[] = [
-  { key: 'start', label: 'Запуск' },
-  { key: 'world', label: 'Мир' },
+const pageMeta: { key: PageKey; label: string; icon?: string }[] = [
+  { key: 'world', label: 'Мир', icon: '◉' },
+  { key: 'start', label: 'Помощь', icon: '?' },
   { key: 'core', label: 'Живое ядро' },
   { key: 'dashboard', label: 'Дашборд' },
   { key: 'oracle', label: 'Оракул' },
@@ -43,7 +42,7 @@ const pageMeta: { key: PageKey; label: string }[] = [
   { key: 'graph', label: 'Граф' },
   { key: 'history', label: 'История' },
   { key: 'settings', label: 'Настройки' },
-  { key: 'system', label: 'Система' },
+  { key: 'system', label: 'Система', icon: '⌁' },
 ]
 
 function DesktopOnlyGate() {
@@ -58,7 +57,6 @@ function DesktopOnlyGate() {
 }
 
 function DesktopApp() {
-  const navigate = useNavigate()
   const location = useLocation()
   const [checkins, setCheckins] = useState<CheckinRecord[]>([])
   const [latestCheckin, setLatestCheckin] = useState<CheckinRecord | undefined>()
@@ -67,7 +65,7 @@ function DesktopApp() {
   const [appearance, setAppearance] = useState<AppearanceSettings>(() => loadAppearanceSettings())
   const [frame, setFrame] = useState<FrameSnapshotRecord | undefined>()
   const [hintsEnabled, setHintsEnabled] = useState(false)
-  const [bootstrapped, setBootstrapped] = useState(false)
+  const [navExpanded, setNavExpanded] = useState(false)
 
   const loadData = async () => {
     const [all, latest, currentQuest] = await Promise.all([listCheckins(), getLatestCheckin(), getActiveQuest()])
@@ -87,7 +85,6 @@ function DesktopApp() {
     void Promise.resolve().then(async () => {
       if (cancelled) return
       await loadData()
-      if (!cancelled) setBootstrapped(true)
     })
     return () => { cancelled = true }
   }, [])
@@ -98,59 +95,35 @@ function DesktopApp() {
     saveAppearanceSettings(appearance)
   }, [appearance])
 
-  const missionSummary = useMemo(() => {
-    const payload = frame?.payload
-    return {
-      index: payload?.stateSnapshot.index ?? 0,
-      risk: (payload?.stateSnapshot.risk ?? 0) >= 3 ? 'повышенный' : (payload?.stateSnapshot.risk ?? 0) >= 1.5 ? 'средний' : 'низкий',
-      forecast: payload?.forecastSummary.p50next7 ?? 0,
-      signals: payload?.regimeSnapshot.explainTop3.length ?? 0,
-      volatility: (payload?.stateSnapshot.volatility ?? 0) > 1.6 ? 'высокая' : (payload?.stateSnapshot.volatility ?? 0) > 0.8 ? 'средняя' : 'низкая',
-      confidence: payload?.forecastSummary.confidence ?? 'низкая' as const,
-      regimeId: (payload?.regimeSnapshot.regimeId ?? 0) as 0 | 1 | 2 | 3 | 4,
-      pCollapse: payload?.regimeSnapshot.pCollapse ?? 0,
-      sirenLevel: payload?.regimeSnapshot.sirenLevel ?? 'green' as const,
-    }
-  }, [frame])
-
-  const hasSeenStart = typeof window !== 'undefined' && window.localStorage.getItem('hasSeenStart') === '1'
-  const shouldAutoStart = bootstrapped && (!hasSeenStart || checkins.length === 0 || !frame)
-
-  useEffect(() => {
-    if (checkins.length > 0) window.localStorage.setItem('hasSeenStart', '1')
-  }, [checkins.length])
-
-  useEffect(() => {
-    if (!shouldAutoStart || location.pathname === '/start') return
-    navigate('/start', { replace: true })
-  }, [location.pathname, navigate, shouldAutoStart])
+  const isWorldHomeRoute = location.pathname === '/world' || location.pathname === '/start'
+  const collapseSidebar = isWorldHomeRoute && !navExpanded
 
   return (
-    <div className={`layout ${hintsEnabled && location.pathname === '/start' ? 'layout--hints' : ''}`.trim()}>
+    <div className={`layout ${hintsEnabled && location.pathname === '/start' ? 'layout--hints' : ''} ${collapseSidebar ? 'layout--sidebar-collapsed' : ''}`.trim()}>
       <Starfield />
       <CommandPalette />
       <aside className="sidebar panel">
-        <h2>Gamno</h2>
+        <div className="sidebar__head">
+          <h2>Gamno</h2>
+          {isWorldHomeRoute ? (
+            <button type="button" className="sidebar__toggle" onClick={() => setNavExpanded((prev) => !prev)} aria-label={collapseSidebar ? 'Показать меню' : 'Свернуть меню'}>
+              {collapseSidebar ? '☰' : '←'}
+            </button>
+          ) : null}
+        </div>
         <nav>
           {pageMeta.map((page) => (
-            <NavLink key={page.key} className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`} to={`/${page.key}`} data-help-target={page.key === 'world' ? 'nav-world' : page.key === 'start' ? 'nav-start' : undefined}>{page.label}</NavLink>
+            <NavLink key={page.key} className={({ isActive }) => `nav-link ${isActive ? 'nav-link--active' : ''}`} to={`/${page.key}`} data-help-target={page.key === 'world' ? 'nav-world' : page.key === 'start' ? 'nav-start' : undefined}>
+              <span className="nav-link__icon" aria-hidden="true">{page.icon ?? page.label[0] ?? "•"}</span>
+              <span className="nav-link__label">{page.label}</span>
+            </NavLink>
           ))}
         </nav>
       </aside>
 
       <main className="content">
-        <MissionStrip
-          {...missionSummary}
-          activeQuest={activeQuest}
-          goalSummary={frame ? { score: frame.payload.goal.goalScore, trend: null } : null}
-          tailRisk={frame ? { pRed7d: frame.payload.tailRiskSummary.pRed7d, esCollapse10: frame.payload.tailRiskSummary.esCollapse10 ?? 0 } : null}
-          socialTop3={(frame?.payload.socialSummary.topInfluencesWeek ?? []).map((text) => ({ metric: 'all', text }))}
-          debtSummary={frame ? { totalDebt: frame.payload.debt.totalDebt, trend: frame.payload.debt.trend } : null}
-          autopilotSummary={frame?.payload.autopilotSummary.policy ? { policyRu: frame.payload.autopilotSummary.policy, nextActionRu: frame.payload.autopilotSummary.nextAction ?? '—' } : null}
-          recoverySummary={frame ? { score: frame.payload.antifragility.recoveryScore, trend: 'flat' } : null}
-        />
         <Routes>
-          <Route path="/" element={<Navigate to={shouldAutoStart ? '/start' : '/world'} replace />} />
+          <Route path="/" element={<Navigate to="/world" replace />} />
           <Route path="/start" element={<StartPage onDone={loadData} hintsEnabled={hintsEnabled} onHintsChange={setHintsEnabled} />} />
           <Route path="/launch" element={<Navigate to="/start" replace />} />
           <Route path="/world" element={<WorldPage />} />
