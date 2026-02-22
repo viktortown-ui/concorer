@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import type { WorldMapPlanet } from '../../core/worldMap/types'
-import { advanceOrbitPhase, buildPlanetOrbitSpec, orbitLocalPoint, relaxOrbitPhases, resolveOrbitVisualState } from './worldWebglOrbits'
+import { advanceOrbitPhase, buildPlanetOrbitSpec, getOrbitVisualStylePreset, orbitLocalPoint, relaxOrbitPhases, resolveOrbitVisualState } from './worldWebglOrbits'
 
 const planet: WorldMapPlanet = {
   id: 'planet:alpha',
@@ -77,6 +77,18 @@ describe('worldWebglOrbits', () => {
     expect(Number.isFinite(local.z)).toBe(true)
   })
 
+
+  it('expands only first two orbits using core clearance rule', () => {
+    const inner0 = buildPlanetOrbitSpec(planet, 10, 0, planet.radius * 0.042, 1, { coreRadius: 3.9, maxPlanetRadius: 0.8 })
+    const inner1 = buildPlanetOrbitSpec(planet, 10, 1, planet.radius * 0.042, 1, { coreRadius: 3.9, maxPlanetRadius: 0.8 })
+    const outer2 = buildPlanetOrbitSpec(planet, 10, 2, planet.radius * 0.042, 1, { coreRadius: 3.9, maxPlanetRadius: 0.8 })
+    const minInnerRadius = 3.9 * 1.35 + 0.8 * 0.5 + 3.9 * 0.25
+
+    expect(inner0.radiusHint).toBeGreaterThanOrEqual(minInnerRadius)
+    expect(inner1.radiusHint).toBeGreaterThanOrEqual(minInnerRadius)
+    expect(outer2.radiusHint).toBeLessThan(minInnerRadius)
+  })
+
   it('keeps eccentricity and inclination within compact bounds', () => {
     const innerOrbit = buildPlanetOrbitSpec(planet, 27, 1, planet.radius * 0.042)
     const outerOrbit = buildPlanetOrbitSpec(planet, 91, 6, planet.radius * 0.042)
@@ -86,14 +98,17 @@ describe('worldWebglOrbits', () => {
     expect(THREE.MathUtils.radToDeg(outerOrbit.inclination)).toBeLessThanOrEqual(14)
   })
 
-  it('resolves orbit visual hierarchy for selected, neighbor and distant orbits', () => {
-    expect(resolveOrbitVisualState(4, 4)).toEqual({ opacity: 0.86, lineWidth: 1.5 })
-    expect(resolveOrbitVisualState(5, 4)).toEqual({ opacity: 0.32, lineWidth: 1.25 })
-    expect(resolveOrbitVisualState(9, 4)).toEqual({ opacity: 0.12, lineWidth: 1.1 })
+  it('resolves orbit visual hierarchy for selected, near-inner and distant orbits', () => {
+    const style = getOrbitVisualStylePreset()
+    expect(resolveOrbitVisualState(4, 4)).toEqual({ opacity: style.selectedOpacity, lineWidth: style.selectedLineWidth })
+    expect(resolveOrbitVisualState(1, 4)).toEqual({ opacity: style.nearOpacity, lineWidth: style.nearLineWidth })
+    expect(resolveOrbitVisualState(9, 4)).toEqual({ opacity: style.baseOpacity, lineWidth: style.baseLineWidth })
   })
 
-  it('keeps all orbits quietly visible when nothing is selected', () => {
-    expect(resolveOrbitVisualState(2, null)).toEqual({ opacity: 0.14, lineWidth: 1.2 })
+  it('keeps inner near orbits readable when nothing is selected', () => {
+    const style = getOrbitVisualStylePreset()
+    expect(resolveOrbitVisualState(2, null)).toEqual({ opacity: style.nearOpacity, lineWidth: style.nearLineWidth })
+    expect(resolveOrbitVisualState(5, null)).toEqual({ opacity: style.baseOpacity, lineWidth: style.baseLineWidth })
   })
 
 })

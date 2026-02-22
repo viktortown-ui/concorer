@@ -15,8 +15,8 @@ const WORLD_SCALE_PRESETS: Record<WorldScalePreset, WorldScaleSpec> = {
     minSeparationScale: 1.08,
   },
   normal: {
-    coreRadiusScale: 1.9,
-    planetRadiusScale: 1.62,
+    coreRadiusScale: 2.0,
+    planetRadiusScale: 1.15,
     orbitRadiusScale: 0.94,
     minSeparationScale: 1.2,
   },

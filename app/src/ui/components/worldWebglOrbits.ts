@@ -54,23 +54,54 @@ export interface OrbitVisualState {
   lineWidth: number
 }
 
+interface OrbitVisualStylePreset {
+  baseOpacity: number
+  nearOpacity: number
+  selectedOpacity: number
+  baseLineWidth: number
+  nearLineWidth: number
+  selectedLineWidth: number
+}
+
+const ORBIT_VISUAL_STYLE: OrbitVisualStylePreset = {
+  baseOpacity: 0.1,
+  nearOpacity: 0.18,
+  selectedOpacity: 0.8,
+  baseLineWidth: 0.96,
+  nearLineWidth: 1.04,
+  selectedLineWidth: 1.5,
+}
+
+export function getOrbitVisualStylePreset(): OrbitVisualStylePreset {
+  return ORBIT_VISUAL_STYLE
+}
+
 export function resolveOrbitVisualState(
   orbitIndex: number,
   selectedOrbitIndex: number | null,
 ): OrbitVisualState {
   if (selectedOrbitIndex == null) {
-    return { opacity: 0.14, lineWidth: 1.2 }
+    if (orbitIndex <= 2) {
+      return { opacity: ORBIT_VISUAL_STYLE.nearOpacity, lineWidth: ORBIT_VISUAL_STYLE.nearLineWidth }
+    }
+    return { opacity: ORBIT_VISUAL_STYLE.baseOpacity, lineWidth: ORBIT_VISUAL_STYLE.baseLineWidth }
   }
 
   if (orbitIndex === selectedOrbitIndex) {
-    return { opacity: 0.86, lineWidth: 1.5 }
+    return { opacity: ORBIT_VISUAL_STYLE.selectedOpacity, lineWidth: ORBIT_VISUAL_STYLE.selectedLineWidth }
   }
 
-  if (Math.abs(orbitIndex - selectedOrbitIndex) === 1) {
-    return { opacity: 0.32, lineWidth: 1.25 }
+  if (orbitIndex <= 2) {
+    return { opacity: ORBIT_VISUAL_STYLE.nearOpacity, lineWidth: ORBIT_VISUAL_STYLE.nearLineWidth }
   }
 
-  return { opacity: 0.12, lineWidth: 1.1 }
+  return { opacity: ORBIT_VISUAL_STYLE.baseOpacity, lineWidth: ORBIT_VISUAL_STYLE.baseLineWidth }
+}
+
+export interface InnerOrbitLayoutInput {
+  coreRadius: number
+  maxPlanetRadius: number
+  clearance?: number
 }
 
 function shortestAngleDelta(a: number, b: number): number {
@@ -121,13 +152,20 @@ export function buildPlanetOrbitSpec(
   orbitIndex: number,
   meshRadius: number,
   orbitRadiusScale = 1,
+  innerOrbitLayout?: InnerOrbitLayoutInput,
 ): OrbitSpec {
   const hash = hashString(`${planet.id}:${seed}:orbit`)
   const index = Math.max(0, orbitIndex)
   const semiMajorBase = (1.9 + index * 0.63) * orbitRadiusScale
-  const semiMajor = semiMajorBase + hashToUnit(hash ^ 0x85ebca6b) * 0.16 + meshRadius * 0.7
+  const semiMajorRaw = semiMajorBase + hashToUnit(hash ^ 0x85ebca6b) * 0.16 + meshRadius * 0.7
   const eccentricity = hashToUnit(hash ^ 0x9e3779b9) * 0.2
-  const semiMinor = semiMajor * (1 - eccentricity)
+  const clearance = innerOrbitLayout?.clearance ?? (innerOrbitLayout ? innerOrbitLayout.coreRadius * 0.25 : 0)
+  const minInnerRadius = innerOrbitLayout
+    ? innerOrbitLayout.coreRadius * 1.35 + innerOrbitLayout.maxPlanetRadius * 0.5 + clearance
+    : 0
+  const constrainedInnerRadius = index <= 1 ? minInnerRadius : 0
+  const semiMajor = Math.max(semiMajorRaw, constrainedInnerRadius)
+  const semiMinor = Math.max(semiMajor * (1 - eccentricity), constrainedInnerRadius)
   const inclinationCap = index <= 2 ? 8 : 14
   const inclinationDeg = hashToUnit(hash ^ 0xc2b2ae35) * inclinationCap
   const inclination = THREE.MathUtils.degToRad(inclinationDeg)
