@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import type { WorldMapPlanet, WorldMapSnapshot } from '../../core/worldMap/types'
 import { getWorldScaleSpec } from './worldWebglScaleSpec'
 
-const WORLD_VIEW_FILL = 0.68
+const WORLD_VIEW_FILL = 0.64
 const WORLD_SCALE_SPEC = getWorldScaleSpec()
 
 function toWorldPosition(snapshot: WorldMapSnapshot, planet: WorldMapPlanet): THREE.Vector3 {

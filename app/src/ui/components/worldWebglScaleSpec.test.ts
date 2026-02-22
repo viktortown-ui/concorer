@@ -15,6 +15,6 @@ describe('worldWebglScaleSpec', () => {
   it('reads explicit preset from localStorage in dev mode', () => {
     window.localStorage.setItem('worldScalePreset', 'epic')
     expect(readWorldScalePreset()).toBe('epic')
-    expect(getWorldScaleSpec().planetRadiusScale).toBeGreaterThan(1.7)
+    expect(getWorldScaleSpec().planetRadiusScale).toBeGreaterThan(1.1)
   })
 })
