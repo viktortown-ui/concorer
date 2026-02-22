@@ -41,9 +41,9 @@ describe('worldWebglOrbits', () => {
 
   it('relaxes phases deterministically', () => {
     const input = [
-      { id: 'a', orbitRadius: 1.1, phase: 0.1 },
-      { id: 'b', orbitRadius: 1.2, phase: 0.11 },
-      { id: 'c', orbitRadius: 2.2, phase: 0.8 },
+      { id: 'a', orbitRadius: 1.1, planetRadius: 0.22, phase: 0.1 },
+      { id: 'b', orbitRadius: 1.2, planetRadius: 0.2, phase: 0.11 },
+      { id: 'c', orbitRadius: 2.2, planetRadius: 0.3, phase: 0.8 },
     ]
 
     const first = relaxOrbitPhases(input)
@@ -75,5 +75,14 @@ describe('worldWebglOrbits', () => {
     expect(local.y).toBe(0)
     expect(Number.isFinite(local.x)).toBe(true)
     expect(Number.isFinite(local.z)).toBe(true)
+  })
+
+  it('keeps eccentricity and inclination within compact bounds', () => {
+    const innerOrbit = buildPlanetOrbitSpec(planet, 27, 1, planet.radius * 0.042)
+    const outerOrbit = buildPlanetOrbitSpec(planet, 91, 6, planet.radius * 0.042)
+
+    expect((innerOrbit.curve.xRadius - innerOrbit.curve.yRadius) / innerOrbit.curve.xRadius).toBeLessThanOrEqual(0.2)
+    expect(THREE.MathUtils.radToDeg(innerOrbit.inclination)).toBeLessThanOrEqual(8)
+    expect(THREE.MathUtils.radToDeg(outerOrbit.inclination)).toBeLessThanOrEqual(14)
   })
 })
