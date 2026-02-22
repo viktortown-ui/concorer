@@ -44,6 +44,7 @@ export function advanceOrbitPhase(currentPhase: number, speed: number, deltaMs: 
 export interface OrbitPhaseInput {
   id: string
   orbitRadius: number
+  planetRadius: number
   phase: number
 }
 
@@ -60,7 +61,7 @@ function normalizeAngle(angle: number): number {
   return next
 }
 
-export function relaxOrbitPhases(entries: OrbitPhaseInput[], minSep = 0.3, iterations = 8): OrbitPhaseInput[] {
+export function relaxOrbitPhases(entries: OrbitPhaseInput[], minSep = 0.3, iterations = 8, minSeparationScale = 1): OrbitPhaseInput[] {
   const relaxed = entries
     .map((entry) => ({ ...entry, phase: normalizeAngle(entry.phase) }))
     .sort((a, b) => (a.orbitRadius - b.orbitRadius) || a.id.localeCompare(b.id))
@@ -74,8 +75,11 @@ export function relaxOrbitPhases(entries: OrbitPhaseInput[], minSep = 0.3, itera
         if (radiusDelta > 0.35) continue
         const delta = shortestAngleDelta(a.phase, b.phase)
         const distance = Math.abs(delta)
-        if (distance >= minSep) continue
-        const correction = (minSep - distance) * 0.5
+        const minRadius = Math.max(0.001, Math.min(a.orbitRadius, b.orbitRadius))
+        const linearSep = ((a.planetRadius + b.planetRadius) / minRadius) * minSeparationScale
+        const minSepForPair = Math.max(minSep, linearSep)
+        if (distance >= minSepForPair) continue
+        const correction = (minSepForPair - distance) * 0.5
         const direction = delta >= 0 ? 1 : -1
         a.phase = normalizeAngle(a.phase + correction * direction)
         b.phase = normalizeAngle(b.phase - correction * direction)
@@ -86,14 +90,21 @@ export function relaxOrbitPhases(entries: OrbitPhaseInput[], minSep = 0.3, itera
   return relaxed
 }
 
-export function buildPlanetOrbitSpec(planet: WorldMapPlanet, seed: number, orbitIndex: number, meshRadius: number): OrbitSpec {
+export function buildPlanetOrbitSpec(
+  planet: WorldMapPlanet,
+  seed: number,
+  orbitIndex: number,
+  meshRadius: number,
+  orbitRadiusScale = 1,
+): OrbitSpec {
   const hash = hashString(`${planet.id}:${seed}:orbit`)
   const index = Math.max(0, orbitIndex)
-  const semiMajorBase = 1.9 + index * 0.63
+  const semiMajorBase = (1.9 + index * 0.63) * orbitRadiusScale
   const semiMajor = semiMajorBase + hashToUnit(hash ^ 0x85ebca6b) * 0.16 + meshRadius * 0.7
-  const eccentricity = hashToUnit(hash ^ 0x9e3779b9) * 0.25
+  const eccentricity = hashToUnit(hash ^ 0x9e3779b9) * 0.2
   const semiMinor = semiMajor * (1 - eccentricity)
-  const inclinationDeg = hashToUnit(hash ^ 0xc2b2ae35) * (8 + Math.min(index, 8) * 0.9)
+  const inclinationCap = index <= 2 ? 8 : 14
+  const inclinationDeg = hashToUnit(hash ^ 0xc2b2ae35) * inclinationCap
   const inclination = THREE.MathUtils.degToRad(inclinationDeg)
   const nodeRotation = hashToUnit(hash ^ 0x27d4eb2f) * TWO_PI
   const phase = hashToUnit(hash ^ 0x165667b1)

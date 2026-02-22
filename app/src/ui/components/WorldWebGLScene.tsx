@@ -20,6 +20,7 @@ import { IdleDriftController } from './worldWebglIdleDrift'
 import { createPlanetMaterial, planetMaterialTuningFromPalette, planetPaletteFromId } from './worldWebglPlanetStyle'
 import { applySceneEnvironment, collectLightingDiagnostics, createIBL, warnIfLightingInvalid } from './worldWebglLighting'
 import { advanceOrbitPhase, buildPlanetOrbitSpec, orbitLocalPoint, relaxOrbitPhases, type OrbitSpec } from './worldWebglOrbits'
+import { getWorldScaleSpec } from './worldWebglScaleSpec'
 
 interface WorldWebGLSceneProps {
   snapshot: WorldMapSnapshot
@@ -52,6 +53,7 @@ function readBloomPreset(): BloomPresetName {
 
 const BLOOM_PARAMS = BLOOM_PRESETS[readBloomPreset()]
 const EXPOSURE_RANGE = { min: 0.9, max: 1.1 }
+const WORLD_SCALE_SPEC = getWorldScaleSpec()
 
 interface PlanetOrbitState {
   mesh: THREE.Mesh
@@ -99,7 +101,7 @@ function computeDebugBoundingRadius(snapshot: WorldMapSnapshot, planets: WorldMa
     const point = toWorldPosition(snapshot, planet)
     return Math.max(acc, point.length())
   }, 0)
-  const maxRingRadius = snapshot.rings.reduce((acc, ring) => Math.max(acc, ring.radius * 0.045), 0)
+  const maxRingRadius = snapshot.rings.reduce((acc, ring) => Math.max(acc, ring.radius * 0.045 * WORLD_SCALE_SPEC.orbitRadiusScale), 0)
   return Math.max(maxPlanetRadius, maxRingRadius)
 }
 
@@ -277,11 +279,11 @@ export function WorldWebGLScene({
 
     const coreGroup = new THREE.Group()
     const core = new THREE.Mesh(
-      new THREE.SphereGeometry(1.0, 64, 64),
+      new THREE.SphereGeometry(1.0 * WORLD_SCALE_SPEC.coreRadiusScale, 64, 64),
       new THREE.MeshStandardMaterial({ color: 0x6baeff, emissive: 0x4bd5ff, emissiveIntensity: 0.72, metalness: 0.06, roughness: 0.58 }),
     )
     const fresnelShell = new THREE.Mesh(
-      new THREE.SphereGeometry(1.18, 64, 64),
+      new THREE.SphereGeometry(1.18 * WORLD_SCALE_SPEC.coreRadiusScale, 64, 64),
       new THREE.ShaderMaterial({
         transparent: true,
         depthWrite: false,
@@ -296,7 +298,7 @@ export function WorldWebGLScene({
       }),
     )
     const halo = new THREE.Mesh(
-      new THREE.RingGeometry(1.35, 1.95, 96),
+      new THREE.RingGeometry(1.35 * WORLD_SCALE_SPEC.coreRadiusScale, 1.95 * WORLD_SCALE_SPEC.coreRadiusScale, 96),
       new THREE.MeshBasicMaterial({ color: 0x67ffdb, transparent: true, opacity: 0.14, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
     )
     halo.rotation.x = Math.PI / 2
@@ -305,7 +307,7 @@ export function WorldWebGLScene({
     halo.layers.enable(BLOOM_LAYER)
     if (snapshot.metrics.safeMode) {
       const shield = new THREE.Mesh(
-        new THREE.SphereGeometry(2.08, 48, 48),
+        new THREE.SphereGeometry(2.08 * WORLD_SCALE_SPEC.coreRadiusScale, 48, 48),
         new THREE.MeshBasicMaterial({ color: 0x6fffd8, transparent: true, opacity: 0.12, wireframe: true }),
       )
       coreGroup.add(shield)
@@ -316,20 +318,20 @@ export function WorldWebGLScene({
     const orbitByPlanetId = new Map<string, OrbitSpec>()
     const planetOrbitStates: PlanetOrbitState[] = []
     const planetOrbitLines: Line2[] = []
-    const phaseInputs: Array<{ id: string; orbitRadius: number; phase: number }> = []
+    const phaseInputs: Array<{ id: string; orbitRadius: number; planetRadius: number; phase: number }> = []
     const orbitTmp = new THREE.Vector3()
     const orbitNearest = new THREE.Vector3()
     const orbitLocal = new THREE.Vector3()
     planets.forEach((planet) => {
       const palette = planetPaletteFromId(planet.id, snapshot.seed)
       const tuning = planetMaterialTuningFromPalette(palette.type, planet)
-      const radius = planet.radius * 0.042
+      const radius = planet.radius * 0.042 * WORLD_SCALE_SPEC.planetRadiusScale
       const material = createPlanetMaterial(palette, tuning, ibl.texture, worldForceUnlitPlanets)
       const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 36, 36), material)
       mesh.renderOrder = 3
-      const orbit = buildPlanetOrbitSpec(planet, snapshot.seed, planet.order, radius)
+      const orbit = buildPlanetOrbitSpec(planet, snapshot.seed, planet.order, radius, WORLD_SCALE_SPEC.orbitRadiusScale)
       orbitByPlanetId.set(planet.id, orbit)
-      phaseInputs.push({ id: planet.id, orbitRadius: orbit.radiusHint, phase: orbit.phase })
+      phaseInputs.push({ id: planet.id, orbitRadius: orbit.radiusHint, planetRadius: radius, phase: orbit.phase })
       mesh.userData.planetId = planet.id
 
       const orbitGroup = new THREE.Group()
@@ -363,7 +365,7 @@ export function WorldWebGLScene({
       planetMeshes.set(planet.id, mesh)
     })
 
-    const relaxed = relaxOrbitPhases(phaseInputs)
+    const relaxed = relaxOrbitPhases(phaseInputs, 0.3, 8, WORLD_SCALE_SPEC.minSeparationScale)
     const phaseMap = new Map(relaxed.map((entry) => [entry.id, entry.phase]))
     planetOrbitStates.forEach((state) => {
       const phase = phaseMap.get(state.mesh.userData.planetId as string) ?? state.phase
