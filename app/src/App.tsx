@@ -1,4 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  FloatingFocusManager,
+  FloatingOverlay,
+  FloatingPortal,
+  flip,
+  offset,
+  shift,
+  autoUpdate,
+  useClick,
+  useDismiss,
+  useFloating,
+  useInteractions,
+  useRole,
+} from '@floating-ui/react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import type { CheckinRecord, CheckinValues } from './core/models/checkin'
 import type { QuestRecord } from './core/models/quest'
@@ -88,7 +102,27 @@ function DesktopApp() {
   const [isRailCollapsed, setIsRailCollapsed] = useState(false)
   const [isMoreOpen, setIsMoreOpen] = useState(false)
   const [moreSearch, setMoreSearch] = useState('')
-  const morePanelRef = useRef<HTMLDivElement | null>(null)
+  const [moreReferenceEl, setMoreReferenceEl] = useState<HTMLButtonElement | null>(null)
+  const [moreFloatingEl, setMoreFloatingEl] = useState<HTMLDivElement | null>(null)
+  const { floatingStyles, context } = useFloating({
+    elements: {
+      reference: moreReferenceEl,
+      floating: moreFloatingEl,
+    },
+    open: isMoreOpen,
+    onOpenChange: (open) => {
+      setIsMoreOpen(open)
+      if (!open) setMoreSearch('')
+    },
+    placement: 'right-start',
+    whileElementsMounted: autoUpdate,
+    middleware: [offset(8), flip(), shift({ padding: 8 })],
+  })
+
+  const click = useClick(context)
+  const dismiss = useDismiss(context)
+  const role = useRole(context, { role: 'dialog' })
+  const { getReferenceProps, getFloatingProps } = useInteractions([click, dismiss, role])
 
   const loadData = async () => {
     const [all, latest, currentQuest] = await Promise.all([listCheckins(), getLatestCheckin(), getActiveQuest()])
@@ -111,26 +145,6 @@ function DesktopApp() {
     })
     return () => { cancelled = true }
   }, [])
-
-  useEffect(() => {
-    if (!isMoreOpen) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setIsMoreOpen(false)
-      }
-    }
-    const onPointerDown = (event: MouseEvent) => {
-      if (!morePanelRef.current?.contains(event.target as Node)) {
-        setIsMoreOpen(false)
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('mousedown', onPointerDown)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('mousedown', onPointerDown)
-    }
-  }, [isMoreOpen])
 
   useEffect(() => {
     const onToggleRailShortcut = (event: KeyboardEvent) => {
@@ -207,16 +221,14 @@ function DesktopApp() {
         </div>
         <nav role="navigation" aria-label="Навигация" tabIndex={0}>
           {primaryNavItems.map((item) => renderNavLink(item))}
-          <div className="nav-more" ref={morePanelRef}>
+          <div className="nav-more" data-testid="nav-more-flyout-root">
             <button
               type="button"
               className={`nav-link nav-link--button ${isMoreOpen ? 'nav-link--active' : ''}`}
-              onClick={() => {
-                setIsMoreOpen((prev) => !prev)
-                if (isMoreOpen) setMoreSearch('')
-              }}
+              ref={setMoreReferenceEl}
+              {...getReferenceProps()}
               aria-expanded={isMoreOpen}
-              aria-controls="rail-more-list"
+              aria-controls={isMoreOpen ? 'rail-more-list' : undefined}
               title={collapseSidebar ? 'Ещё' : undefined}
               data-tooltip={collapseSidebar ? 'Ещё' : undefined}
             >
@@ -224,29 +236,40 @@ function DesktopApp() {
               <span className="nav-link__label">Ещё</span>
             </button>
             {isMoreOpen ? (
-              <div id="rail-more-list" className="nav-more__popover" role="dialog" aria-label="Дополнительные разделы">
-                <div className="nav-more__search-wrap">
-                  <input
-                    type="search"
-                    className="nav-more__search"
-                    placeholder="Поиск модуля"
-                    value={moreSearch}
-                    onChange={(event) => setMoreSearch(event.target.value)}
-                    aria-label="Поиск по дополнительным разделам"
-                  />
-                </div>
-                {filteredSecondaryGroups.map((group) => (
-                  <section key={group.title} className="nav-more__group" aria-label={group.title}>
-                    <h3>{group.title}</h3>
-                    <div className="nav-more__list" role="menu" aria-label={group.title}>
-                      {group.items.map((item) => renderNavLink(item, true))}
+              <FloatingPortal>
+                <FloatingOverlay lockScroll={false} className="nav-more__overlay" style={{ left: collapseSidebar ? 96 : 286 }} />
+                <FloatingFocusManager context={context} modal={false} initialFocus={-1} returnFocus>
+                  <div
+                    id="rail-more-list"
+                    className="nav-more__popover"
+                    ref={setMoreFloatingEl}
+                    style={floatingStyles}
+                    aria-label="Ещё"
+                    {...getFloatingProps()}
+                  >
+                    <h3 className="nav-more__title">Ещё</h3>
+                    <div className="nav-more__search-wrap">
+                      <input
+                        type="search"
+                        className="nav-more__search"
+                        placeholder="Поиск модуля"
+                        value={moreSearch}
+                        onChange={(event) => setMoreSearch(event.target.value)}
+                        aria-label="Поиск по дополнительным разделам"
+                      />
                     </div>
-                  </section>
-                ))}
-                {filteredSecondaryGroups.length === 0 ? (
-                  <p className="nav-more__empty">Ничего не найдено</p>
-                ) : null}
-              </div>
+                    {filteredSecondaryGroups.map((group) => (
+                      <section key={group.title} className="nav-more__group" aria-label={group.title}>
+                        <h4>{group.title}</h4>
+                        <div className="nav-more__list" role="menu" aria-label={group.title}>
+                          {group.items.map((item) => renderNavLink(item, true))}
+                        </div>
+                      </section>
+                    ))}
+                    {filteredSecondaryGroups.length === 0 ? <p className="nav-more__empty">Ничего не найдено</p> : null}
+                  </div>
+                </FloatingFocusManager>
+              </FloatingPortal>
             ) : null}
           </div>
         </nav>

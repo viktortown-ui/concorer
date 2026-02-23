@@ -157,7 +157,10 @@ code,
   place-items: center;
   text-align: center;
   flex-shrink: 0;
-  opacity: 0.95;
+  opacity: 0.68;
+  color: color-mix(in srgb, var(--text) 68%, transparent 32%);
+  font-size: 20px;
+  line-height: 1;
 }
 .nav-link__label {
   white-space: nowrap;
@@ -193,6 +196,10 @@ code,
   border-color: rgba(143, 107, 255, 0.32);
   background: color-mix(in srgb, rgba(143, 107, 255, 0.3) 58%, transparent 42%);
 }
+.nav-link--active .nav-link__icon {
+  color: color-mix(in srgb, var(--accent-alt) 55%, var(--accent) 45%);
+  opacity: 1;
+}
 .nav-link--active::before {
   content: '';
   position: absolute;
@@ -216,12 +223,18 @@ code,
   box-shadow: var(--halo);
 }
 .nav-more { position: relative; }
-.nav-more__popover {
-  position: absolute;
-  left: calc(100% + 10px);
+.nav-more__overlay {
+  position: fixed;
+  top: 0;
+  right: 0;
   bottom: 0;
-  width: 286px;
-  max-height: min(74vh, 560px);
+  background: rgba(7, 12, 22, 0.18);
+  z-index: 20;
+}
+.nav-more__popover {
+  position: fixed;
+  width: 312px;
+  max-height: 70vh;
   overflow: auto;
   display: grid;
   gap: 10px;
@@ -232,7 +245,14 @@ code,
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   box-shadow: 0 12px 34px rgba(2, 8, 20, 0.45);
-  z-index: 25;
+  z-index: 30;
+}
+.nav-more__title {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--text) 88%, var(--accent-alt) 12%);
 }
 .nav-more__search-wrap {
   position: sticky;
@@ -250,7 +270,7 @@ code,
   padding: 6px 10px;
 }
 .nav-more__group { display: grid; gap: 6px; }
-.nav-more__group h3 {
+.nav-more__group h4 {
   margin: 0;
   font-size: 11px;
   letter-spacing: 0.08em;
