@@ -189,6 +189,7 @@ function DesktopApp() {
   const renderNavLink = (page: NavItem, compact = false) => (
     <NavLink
       key={page.key}
+      end
       className={({ isActive }) => `nav-link ${compact ? 'nav-link--compact' : ''} ${isActive ? 'nav-link--active' : ''}`.trim()}
       to={`/${page.key}`}
       title={collapseSidebar ? page.label : undefined}
