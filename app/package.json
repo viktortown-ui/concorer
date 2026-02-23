@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@floating-ui/react": "^0.27.18",
     "@types/d3-force": "^3.0.10",
     "cmdk": "^1.1.1",
     "d3-force": "^3.0.0",

@@ -86,7 +86,8 @@ describe('navigation rail', () => {
   })
 
 
-  it('opens More popover with grouped items and search', async () => {
+
+  it('opens More flyout and closes on outside click', async () => {
     const { container, root } = await renderApp()
 
     const moreButton = container.querySelector('.nav-more .nav-link--button') as HTMLButtonElement
@@ -94,19 +95,56 @@ describe('navigation rail', () => {
       moreButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
-    expect(container.textContent).toContain('Модули')
-    expect(container.textContent).toContain('Сервис')
+    expect(document.body.textContent).toContain('Модули')
+    expect(document.body.textContent).toContain('Сервис')
 
-    const searchInput = container.querySelector('.nav-more__search') as HTMLInputElement
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    })
+
+    expect(document.querySelector('#rail-more-list')).toBeNull()
+
+    await act(async () => { root.unmount() })
+    container.remove()
+  })
+
+  it('renders labels inside More flyout items', async () => {
+    const { container, root } = await renderApp()
+
+    const moreButton = container.querySelector('.nav-more .nav-link--button') as HTMLButtonElement
+    await act(async () => {
+      moreButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    const labels = Array.from(document.querySelectorAll('.nav-more__popover .nav-link__label')).map((node) => node.textContent?.trim())
+    expect(labels).toContain('Автопилот')
+    expect(labels).toContain('Система')
+
+    const searchInput = document.querySelector('.nav-more__search') as HTMLInputElement
     await act(async () => {
       const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
       descriptor?.set?.call(searchInput, 'сист')
       searchInput.dispatchEvent(new Event('input', { bubbles: true }))
     })
 
-    const filteredLinks = Array.from(container.querySelectorAll('.nav-more__popover .nav-link__label')).map((node) => node.textContent)
-    expect(filteredLinks).toContain('Система')
-    expect(filteredLinks).not.toContain('Автопилот')
+    const filtered = Array.from(document.querySelectorAll('.nav-more__popover .nav-link__label')).map((node) => node.textContent)
+    expect(filtered).toContain('Система')
+    expect(filtered).not.toContain('Автопилот')
+
+    await act(async () => { root.unmount() })
+    container.remove()
+  })
+
+  it('does not render a second rail for More submenu', async () => {
+    const { container, root } = await renderApp()
+
+    const moreButton = container.querySelector('.nav-more .nav-link--button') as HTMLButtonElement
+    await act(async () => {
+      moreButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(document.querySelectorAll('[data-testid="navigation-rail"]').length).toBe(1)
+    expect(document.querySelector('[data-testid="nav-more-flyout-root"] [data-testid="navigation-rail"]')).toBeNull()
 
     await act(async () => { root.unmount() })
     container.remove()
