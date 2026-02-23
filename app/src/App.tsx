@@ -162,9 +162,16 @@ function DesktopApp() {
   }, [])
 
   useEffect(() => {
-    document.documentElement.dataset.theme = appearance.theme
+    const resolvedTheme = appearance.theme === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : appearance.theme
+    document.documentElement.dataset.theme = resolvedTheme
     document.documentElement.dataset.motion = appearance.motion
     document.documentElement.dataset.transparency = appearance.transparency
+    document.documentElement.dataset.uiPreset = appearance.uiPreset
+    document.documentElement.dataset.accent = appearance.accentColor
+    document.documentElement.dataset.density = appearance.density
+    document.documentElement.dataset.fx = appearance.fxEnabled ? 'on' : 'off'
     window.localStorage.setItem('worldLookPreset', appearance.worldLookPreset)
     window.localStorage.setItem('worldQuality', appearance.worldQuality)
     saveAppearanceSettings(appearance)
