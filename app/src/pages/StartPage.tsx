@@ -85,11 +85,6 @@ export function StartPage({ onDone, hintsEnabled, onHintsChange, uiPreset, world
 
   useEffect(() => {
     if (!isStepsOpen) return
-    setExpandedStepId(defaultExpandedStepId)
-  }, [defaultExpandedStepId, isStepsOpen])
-
-  useEffect(() => {
-    if (!isStepsOpen) return
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -123,7 +118,16 @@ export function StartPage({ onDone, hintsEnabled, onHintsChange, uiPreset, world
           <div className="start-cta-row">
             <button type="button" className="start-primary" onClick={() => navigate('/world')}>Открыть Мир</button>
             <button type="button" className="button-secondary" onClick={() => navigate('/core')}>Первый чек-ин</button>
-            <button type="button" className="button-ghost" onClick={() => setIsStepsOpen(true)}>Как начать (4 шага)</button>
+            <button
+              type="button"
+              className="button-ghost"
+              onClick={() => {
+                setIsStepsOpen(true)
+                setExpandedStepId(defaultExpandedStepId)
+              }}
+            >
+              Как начать (4 шага)
+            </button>
             {import.meta.env.DEV ? (
               <button
                 type="button"
@@ -153,7 +157,7 @@ export function StartPage({ onDone, hintsEnabled, onHintsChange, uiPreset, world
             <div className="start-benefits-grid">
               <article className="start-benefit-card"><h3>Щит</h3><p>Снижай риск до того, как он ударит.</p></article>
               <article className="start-benefit-card"><h3>Прогноз</h3><p>Понимай, какой шаг даст лучший результат.</p></article>
-              <article className="start-benefit-card"><h3>История</h3><p>Видь динамику и закрепляй удачные решения.</p></article>
+              <article className="start-benefit-card"><h3>История</h3><p>Следи за динамикой и закрепляй удачные решения.</p></article>
             </div>
           </section>
         </article>
