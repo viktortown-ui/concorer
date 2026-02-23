@@ -11,13 +11,17 @@ interface HeroBackgroundProps {
 interface VariantStyle {
   glow: string
   starsRgb: string
+  orbitRgb: string
+  planetCore: string
+  planetRim: string
+  shield: string
 }
 
 const VARIANT_STYLES: Record<HeroVariant, VariantStyle> = {
-  clean: { glow: 'rgba(112, 189, 255, 0.18)', starsRgb: '160, 210, 255' },
-  neon: { glow: 'rgba(136, 80, 255, 0.26)', starsRgb: '171, 255, 252' },
-  instrument: { glow: 'rgba(94, 148, 216, 0.22)', starsRgb: '166, 198, 229' },
-  warm: { glow: 'rgba(255, 161, 104, 0.24)', starsRgb: '255, 222, 156' },
+  clean: { glow: 'rgba(112, 189, 255, 0.18)', starsRgb: '160, 210, 255', orbitRgb: '168, 214, 255', planetCore: 'rgba(156, 214, 255, 0.95)', planetRim: 'rgba(89, 136, 255, 0.85)', shield: 'rgba(171, 233, 255, 0.4)' },
+  neon: { glow: 'rgba(136, 80, 255, 0.26)', starsRgb: '171, 255, 252', orbitRgb: '214, 142, 255', planetCore: 'rgba(255, 165, 255, 0.95)', planetRim: 'rgba(84, 42, 255, 0.9)', shield: 'rgba(84, 246, 255, 0.42)' },
+  instrument: { glow: 'rgba(94, 148, 216, 0.22)', starsRgb: '166, 198, 229', orbitRgb: '171, 198, 226', planetCore: 'rgba(169, 202, 235, 0.92)', planetRim: 'rgba(71, 112, 172, 0.9)', shield: 'rgba(150, 198, 246, 0.38)' },
+  warm: { glow: 'rgba(255, 161, 104, 0.24)', starsRgb: '255, 222, 156', orbitRgb: '255, 201, 143', planetCore: 'rgba(255, 207, 163, 0.96)', planetRim: 'rgba(190, 86, 45, 0.9)', shield: 'rgba(255, 214, 153, 0.44)' },
 }
 
 function resolveVariant(uiPreset: UiPreset, worldLookPreset: string): HeroVariant {
@@ -42,7 +46,7 @@ export function HeroBackground({ uiPreset, worldLookPreset }: HeroBackgroundProp
     const parent = node.parentElement
     if (!parent) return
 
-    const stars = Array.from({ length: reducedMotion ? 22 : 52 }).map(() => ({
+    const starsFine = Array.from({ length: reducedMotion ? 24 : 54 }).map(() => ({
       x: Math.random(),
       y: Math.random(),
       radius: Math.random() * 1.6 + 0.2,
@@ -51,10 +55,19 @@ export function HeroBackground({ uiPreset, worldLookPreset }: HeroBackgroundProp
       twinkle: Math.random() * Math.PI * 2,
     }))
 
-    const orbits = Array.from({ length: 3 }).map((_, index) => ({
-      radius: 0.18 + index * 0.14,
-      width: 0.55 + index * 0.25,
-      alpha: 0.16 + index * 0.04,
+    const starsLarge = Array.from({ length: reducedMotion ? 7 : 14 }).map(() => ({
+      x: Math.random(),
+      y: Math.random(),
+      radius: Math.random() * 2.4 + 1.2,
+      alpha: Math.random() * 0.45 + 0.3,
+      speed: Math.random() * 0.003 + 0.0007,
+      twinkle: Math.random() * Math.PI * 2,
+    }))
+
+    const orbits = Array.from({ length: 4 }).map((_, index) => ({
+      radius: 0.18 + index * 0.1,
+      width: 0.58 + index * 0.18,
+      alpha: 0.18 + index * 0.04,
     }))
 
     const resize = () => {
@@ -106,19 +119,41 @@ export function HeroBackground({ uiPreset, worldLookPreset }: HeroBackgroundProp
       context.fillStyle = nebula
       context.fillRect(0, 0, width, height)
 
+      const planetX = width * 0.67
+      const planetY = height * 0.48
+
       context.save()
-      context.translate(width * 0.65, height * 0.45)
-      context.rotate(-0.16)
+      context.translate(planetX, planetY)
+      context.rotate(-0.18)
       orbits.forEach((orbit) => {
         context.beginPath()
         context.ellipse(0, 0, width * orbit.radius, width * orbit.radius * orbit.width, 0, 0, Math.PI * 2)
-        context.strokeStyle = `rgba(185, 221, 255, ${orbit.alpha})`
+        context.strokeStyle = `rgba(${palette.orbitRgb}, ${orbit.alpha})`
         context.lineWidth = 1.2 * dpr
         context.stroke()
       })
       context.restore()
 
-      stars.forEach((star) => {
+      const planetRadius = Math.min(width, height) * 0.13
+      const planet = context.createRadialGradient(planetX - planetRadius * 0.35, planetY - planetRadius * 0.4, planetRadius * 0.2, planetX, planetY, planetRadius * 1.25)
+      planet.addColorStop(0, palette.planetCore)
+      planet.addColorStop(0.5, palette.planetRim)
+      planet.addColorStop(1, 'rgba(8, 12, 26, 0.1)')
+      context.fillStyle = planet
+      context.beginPath()
+      context.arc(planetX, planetY, planetRadius, 0, Math.PI * 2)
+      context.fill()
+
+      context.beginPath()
+      context.ellipse(planetX, planetY, planetRadius * 1.42, planetRadius * 1.02, -0.2, 0, Math.PI * 2)
+      context.strokeStyle = palette.shield
+      context.lineWidth = 1.4 * dpr
+      context.shadowColor = palette.shield
+      context.shadowBlur = 18 * dpr
+      context.stroke()
+      context.shadowBlur = 0
+
+      starsFine.forEach((star) => {
         star.twinkle += reducedMotion ? 0 : star.speed
         const twinkle = reducedMotion ? star.alpha : star.alpha * (0.6 + Math.sin(star.twinkle) * 0.4)
         context.beginPath()
@@ -127,7 +162,16 @@ export function HeroBackground({ uiPreset, worldLookPreset }: HeroBackgroundProp
         context.fill()
       })
 
-      context.fillStyle = 'rgba(255,255,255,0.03)'
+      starsLarge.forEach((star) => {
+        star.twinkle += reducedMotion ? 0 : star.speed
+        const twinkle = reducedMotion ? star.alpha : star.alpha * (0.7 + Math.sin(star.twinkle) * 0.3)
+        context.beginPath()
+        context.arc(star.x * width, star.y * height, star.radius * dpr, 0, Math.PI * 2)
+        context.fillStyle = `rgba(${palette.starsRgb}, ${twinkle.toFixed(2)})`
+        context.fill()
+      })
+
+      context.fillStyle = 'rgba(255,255,255,0.025)'
       for (let index = 0; index < 5; index += 1) {
         const y = ((time * 0.0008 * (index + 1)) % 1) * height
         context.fillRect(0, y, width, 0.8 * dpr)

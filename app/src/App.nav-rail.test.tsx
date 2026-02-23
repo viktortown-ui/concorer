@@ -169,6 +169,20 @@ describe('navigation rail', () => {
     container.remove()
   })
 
+
+  it('marks only one primary item active on /start', async () => {
+    window.location.hash = '#/start'
+    const { container, root } = await renderApp()
+
+    const startLink = container.querySelector('a[href="#/start"]') as HTMLAnchorElement
+    const worldLink = container.querySelector('a[href="#/world"]') as HTMLAnchorElement
+
+    expect(startLink.className).toContain('nav-link--active')
+    expect(worldLink.className).not.toContain('nav-link--active')
+
+    await act(async () => { root.unmount() })
+    container.remove()
+  })
   it('changes route on nav click', async () => {
     const { container, root } = await renderApp()
 
