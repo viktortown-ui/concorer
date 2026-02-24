@@ -3,6 +3,7 @@ import { act } from 'react'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 import { createRoot } from 'react-dom/client'
+import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 describe('SettingsPage product settings', () => {
@@ -19,11 +20,13 @@ describe('SettingsPage product settings', () => {
 
     await act(async () => {
       root.render(
-        <SettingsPage
-          onDataChanged={async () => undefined}
-          appearance={{ theme: 'system', motion: 'normal', transparency: 'glass', worldUiVariant: 'instrument', worldRenderMode: 'webgl', worldLookPreset: 'clean', worldQuality: 'standard', uiPreset: 'clean', accentColor: 'auto', density: 'normal', fxEnabled: true, uiSoundEnabled: false, uiSoundVolume: 70 }}
-          onAppearanceChange={() => undefined}
-        />,
+        <MemoryRouter>
+          <SettingsPage
+            onDataChanged={async () => undefined}
+            appearance={{ theme: 'system', motion: 'normal', transparency: 'glass', worldUiVariant: 'instrument', worldRenderMode: 'webgl', worldLookPreset: 'clean', worldQuality: 'standard', uiPreset: 'clean', accentColor: 'auto', density: 'normal', fxEnabled: true, uiSoundEnabled: false, uiSoundVolume: 70 }}
+            onAppearanceChange={() => undefined}
+          />,
+        </MemoryRouter>,
       )
     })
 
@@ -52,11 +55,13 @@ describe('SettingsPage product settings', () => {
 
     await act(async () => {
       root.render(
-        <SettingsPage
-          onDataChanged={async () => undefined}
-          appearance={{ theme: 'system', motion: 'normal', transparency: 'glass', worldUiVariant: 'instrument', worldRenderMode: 'webgl', worldLookPreset: 'clean', worldQuality: 'standard', uiPreset: 'clean', accentColor: 'auto', density: 'normal', fxEnabled: true, uiSoundEnabled: false, uiSoundVolume: 70 }}
-          onAppearanceChange={() => undefined}
-        />,
+        <MemoryRouter>
+          <SettingsPage
+            onDataChanged={async () => undefined}
+            appearance={{ theme: 'system', motion: 'normal', transparency: 'glass', worldUiVariant: 'instrument', worldRenderMode: 'webgl', worldLookPreset: 'clean', worldQuality: 'standard', uiPreset: 'clean', accentColor: 'auto', density: 'normal', fxEnabled: true, uiSoundEnabled: false, uiSoundVolume: 70 }}
+            onAppearanceChange={() => undefined}
+          />,
+        </MemoryRouter>,
       )
     })
 
