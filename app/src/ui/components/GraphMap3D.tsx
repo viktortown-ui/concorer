@@ -1,16 +1,50 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import ForceGraph3D from 'react-force-graph-3d'
+import { Component, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import ForceGraph3D, { type ForceGraphMethods } from 'react-force-graph-3d'
 import { Sprite, SpriteMaterial, CanvasTexture, Color, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, SphereGeometry } from 'three'
 import { METRICS, type MetricId } from '../../core/metrics'
 import type { InfluenceEdge } from '../../core/engines/influence/influence'
 
-interface GraphNode3D {
+type GraphNode = {
+  id: string
+  name?: string
+  x?: number
+  y?: number
+  z?: number
+} & Record<string, unknown>
+
+type GraphLink = {
+  source: string | GraphNode
+  target: string | GraphNode
+  weight?: number
+  sign?: number
+} & Record<string, unknown>
+
+type OrbitControlsLike = {
+  autoRotate?: boolean
+  autoRotateSpeed?: number
+  update?: () => void
+}
+
+type ForceGraphMethodsLike = ForceGraphMethods<GraphNode, GraphLink> & {
+  centerAt: (x?: number, y?: number, ms?: number) => void
+}
+
+interface GraphNode3D extends GraphNode {
   id: MetricId
   name: string
   val: number
   inScore: number
   outScore: number
   sumScore: number
+}
+
+interface GraphLink3D extends GraphLink {
+  source: MetricId
+  target: MetricId
+  from: MetricId
+  to: MetricId
+  weight: number
+  sign: number
 }
 
 export interface GraphMapSelection {
@@ -28,9 +62,19 @@ interface GraphMap3DProps {
   onLinkHover: (edge: { from: MetricId; to: MetricId } | null) => void
   onLinkClick: (edge: { from: MetricId; to: MetricId }) => void
   focusRequest: GraphMapSelection | null
+  onOpenMatrix: () => void
 }
 
 const RESET_CAMERA = { x: 0, y: 0, z: 340 }
+
+function isWebglAvailable(): boolean {
+  try {
+    const canvas = document.createElement('canvas')
+    return Boolean(canvas.getContext('webgl') || canvas.getContext('experimental-webgl'))
+  } catch {
+    return false
+  }
+}
 
 function labelSprite(text: string): Sprite {
   const canvas = document.createElement('canvas')
@@ -53,6 +97,33 @@ function labelSprite(text: string): Sprite {
   return sprite
 }
 
+function GraphMapFallback({ onOpenMatrix }: { onOpenMatrix: () => void }) {
+  return <div className="graph-3d-fallback panel">
+    <p>WebGL недоступен на этом устройстве. Включите аппаратное ускорение или используйте режим «Матрица».</p>
+    <button type="button" className="chip" onClick={onOpenMatrix}>Открыть «Матрица»</button>
+  </div>
+}
+
+class GraphMapErrorBoundary extends Component<{ children: ReactNode; onError: () => void }, { hasError: boolean }> {
+  constructor(props: { children: ReactNode; onError: () => void }) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true }
+  }
+
+  componentDidCatch(): void {
+    this.props.onError()
+  }
+
+  render(): ReactNode {
+    if (this.state.hasError) return null
+    return this.props.children
+  }
+}
+
 export function GraphMap3D(props: GraphMap3DProps) {
   const {
     edges,
@@ -64,8 +135,11 @@ export function GraphMap3D(props: GraphMap3DProps) {
     onLinkHover,
     onLinkClick,
     focusRequest,
+    onOpenMatrix,
   } = props
-  const graphRef = useRef<any>(undefined)
+  const [webglReady] = useState(() => (typeof document === 'undefined' ? true : isWebglAvailable()))
+  const [webglFailed, setWebglFailed] = useState(false)
+  const fgRef = useRef<ForceGraphMethods<GraphNode, GraphLink> | undefined>(undefined)
   const idleTimer = useRef<number | null>(null)
   const [isInteracting, setIsInteracting] = useState(false)
 
@@ -93,31 +167,39 @@ export function GraphMap3D(props: GraphMap3DProps) {
     })
   }, [edges])
 
+  const links = useMemo<GraphLink3D[]>(() => edges.map((edge) => ({
+    source: edge.from,
+    target: edge.to,
+    from: edge.from,
+    to: edge.to,
+    weight: edge.weight,
+    sign: edge.weight >= 0 ? 1 : -1,
+  })), [edges])
+
   useEffect(() => {
-    const graph = graphRef.current
+    const graph = fgRef.current as ForceGraphMethodsLike | undefined
     if (!graph) return
     graph.centerAt(0, 0, 400)
     graph.zoomToFit(400, 40)
-  }, [edges])
+  }, [links])
 
   useEffect(() => {
-    const graph = graphRef.current
+    const graph = fgRef.current
     if (!graph || !focusRequest) return
     if (focusRequest.nodeId) {
       const node = nodes.find((item) => item.id === focusRequest.nodeId)
-      if (node && typeof (node as { x?: number }).x === 'number') {
-        const pos = node as GraphNode3D & { x: number; y: number; z: number }
-        graph.cameraPosition({ x: pos.x + 70, y: pos.y + 50, z: pos.z + 90 }, pos, 700)
+      if (node?.x != null && node.y != null && node.z != null) {
+        graph.cameraPosition({ x: node.x + 70, y: node.y + 50, z: node.z + 90 }, { x: node.x, y: node.y, z: node.z }, 700)
       }
     }
     if (focusRequest.edge) {
-      const source = nodes.find((item) => item.id === focusRequest.edge?.from) as (GraphNode3D & { x?: number; y?: number; z?: number }) | undefined
-      const target = nodes.find((item) => item.id === focusRequest.edge?.to) as (GraphNode3D & { x?: number; y?: number; z?: number }) | undefined
-      if (source?.x != null && target?.x != null) {
+      const source = nodes.find((item) => item.id === focusRequest.edge?.from)
+      const target = nodes.find((item) => item.id === focusRequest.edge?.to)
+      if (source?.x != null && source.y != null && source.z != null && target?.x != null && target.y != null && target.z != null) {
         const point = {
           x: (source.x + target.x) / 2,
-          y: (source.y! + target.y!) / 2,
-          z: (source.z! + target.z!) / 2,
+          y: (source.y + target.y) / 2,
+          z: (source.z + target.z) / 2,
         }
         graph.cameraPosition({ x: point.x + 80, y: point.y + 80, z: point.z + 120 }, point, 700)
       }
@@ -133,85 +215,90 @@ export function GraphMap3D(props: GraphMap3DProps) {
   const shouldOrbit = autoOrbitEnabled && !isInteracting
 
   useEffect(() => {
-    const controls = graphRef.current?.controls?.() as { autoRotate: boolean; autoRotateSpeed: number } | undefined
+    const controls = fgRef.current?.controls() as unknown as OrbitControlsLike
     if (!controls) return
     controls.autoRotate = shouldOrbit
     controls.autoRotateSpeed = 0.2
+    controls.update?.()
   }, [shouldOrbit])
 
+  if (!webglReady || webglFailed) return <GraphMapFallback onOpenMatrix={onOpenMatrix} />
+
   return <div className="graph-3d-wrap" onMouseDown={onUserInteraction} onWheel={onUserInteraction}>
-    <ForceGraph3D
-      ref={graphRef}
-      graphData={{ nodes, links: edges }}
-      width={820}
-      height={420}
-      backgroundColor="#071127"
-      nodeRelSize={4}
-      nodeOpacity={1}
-      nodeLabel={(node) => (node as GraphNode3D).name}
-      nodeVisibility={(node) => {
-        const camera = graphRef.current?.camera()
-        if (!camera) return true
-        const distance = camera.position.length()
-        return distance < 1200 || (node as GraphNode3D).sumScore > 0.8
-      }}
-      nodeThreeObject={(nodeObj) => {
-        const node = nodeObj as GraphNode3D
-        const group = new Group()
-        const isSelected = selectedNodeId === node.id
-        const sphere = new Mesh(
-          new SphereGeometry(Math.max(2.2, node.val * 0.45), 24, 24),
-          new MeshLambertMaterial({ color: isSelected ? '#f59e0b' : '#43f3d0', emissive: new Color(isSelected ? '#7c2d12' : '#0f766e') }),
-        )
-        const halo = new Mesh(
-          new SphereGeometry(Math.max(2.9, node.val * 0.55), 16, 16),
-          new MeshBasicMaterial({ color: isSelected ? '#fbbf24' : '#93c5fd', transparent: true, opacity: 0.18 }),
-        )
-        group.add(halo)
-        group.add(sphere)
-        group.add(labelSprite(node.name))
-        return group
-      }}
-      onNodeHover={(node, event) => {
-        const n = node as GraphNode3D | null
-        onNodeHover(n?.id ?? null, event ? { x: event.clientX, y: event.clientY } : null)
-      }}
-      onNodeClick={(node) => {
-        onUserInteraction()
-        onNodeClick((node as GraphNode3D).id)
-      }}
-      linkColor={(link) => {
-        const edge = link as InfluenceEdge
-        if (selectedEdge && selectedEdge.from === edge.from && selectedEdge.to === edge.to) return '#f59e0b'
-        if (selectedNodeId && (edge.from === selectedNodeId || edge.to === selectedNodeId)) return '#f8fafc'
-        return edge.weight >= 0 ? '#43f3d0' : '#c084fc'
-      }}
-      linkWidth={(link) => {
-        const edge = link as InfluenceEdge
-        const base = Math.max(0.6, Math.abs(edge.weight) * 4)
-        if (selectedEdge && selectedEdge.from === edge.from && selectedEdge.to === edge.to) return base + 2
-        if (selectedNodeId && (edge.from === selectedNodeId || edge.to === selectedNodeId)) return base + 1
-        return base
-      }}
-      linkOpacity={0.9}
-      linkDirectionalParticles={(link) => Math.min(3, Math.max(0, Math.round(Math.abs((link as InfluenceEdge).weight) * 2)))}
-      linkDirectionalParticleWidth={1.5}
-      onLinkHover={(link) => {
-        const edge = link as InfluenceEdge | null
-        if (!edge) return onLinkHover(null)
-        onLinkHover({ from: edge.from, to: edge.to })
-      }}
-      onLinkClick={(link) => {
-        onUserInteraction()
-        const edge = link as InfluenceEdge
-        onLinkClick({ from: edge.from, to: edge.to })
-      }}
-      enableNodeDrag={false}
-      onEngineStop={() => graphRef.current?.zoomToFit(400, 40)}
-    />
+    <GraphMapErrorBoundary onError={() => setWebglFailed(true)}>
+      <ForceGraph3D
+        ref={fgRef}
+        graphData={{ nodes, links }}
+        width={820}
+        height={420}
+        backgroundColor="#071127"
+        nodeRelSize={4}
+        nodeOpacity={1}
+        nodeLabel={(node) => String((node as GraphNode3D).name ?? '')}
+        nodeVisibility={(node) => {
+          const camera = fgRef.current?.camera()
+          if (!camera) return true
+          const distance = camera.position.length()
+          return distance < 1200 || (node as GraphNode3D).sumScore > 0.8
+        }}
+        nodeThreeObject={(nodeObj) => {
+          const node = nodeObj as GraphNode3D
+          const group = new Group()
+          const isSelected = selectedNodeId === node.id
+          const sphere = new Mesh(
+            new SphereGeometry(Math.max(2.2, node.val * 0.45), 24, 24),
+            new MeshLambertMaterial({ color: isSelected ? '#f59e0b' : '#43f3d0', emissive: new Color(isSelected ? '#7c2d12' : '#0f766e') }),
+          )
+          const halo = new Mesh(
+            new SphereGeometry(Math.max(2.9, node.val * 0.55), 16, 16),
+            new MeshBasicMaterial({ color: isSelected ? '#fbbf24' : '#93c5fd', transparent: true, opacity: 0.18 }),
+          )
+          group.add(halo)
+          group.add(sphere)
+          group.add(labelSprite(node.name))
+          return group
+        }}
+        onNodeHover={(node, event) => {
+          const nextNode = node as GraphNode3D | null
+          onNodeHover(nextNode?.id ?? null, event ? { x: event.clientX, y: event.clientY } : null)
+        }}
+        onNodeClick={(node) => {
+          onUserInteraction()
+          onNodeClick((node as GraphNode3D).id)
+        }}
+        linkColor={(linkObj) => {
+          const link = linkObj as GraphLink3D
+          if (selectedEdge && selectedEdge.from === link.from && selectedEdge.to === link.to) return '#f59e0b'
+          if (selectedNodeId && (link.from === selectedNodeId || link.to === selectedNodeId)) return '#f8fafc'
+          return (link.weight ?? 0) >= 0 ? '#43f3d0' : '#c084fc'
+        }}
+        linkWidth={(linkObj) => {
+          const link = linkObj as GraphLink3D
+          const base = Math.max(0.6, Math.abs(link.weight ?? 0) * 4)
+          if (selectedEdge && selectedEdge.from === link.from && selectedEdge.to === link.to) return base + 2
+          if (selectedNodeId && (link.from === selectedNodeId || link.to === selectedNodeId)) return base + 1
+          return base
+        }}
+        linkOpacity={0.9}
+        linkDirectionalParticles={(linkObj) => Math.min(3, Math.max(0, Math.round(Math.abs((linkObj as GraphLink3D).weight ?? 0) * 2)))}
+        linkDirectionalParticleWidth={1.5}
+        onLinkHover={(linkObj) => {
+          const link = linkObj as GraphLink3D | null
+          if (!link) return onLinkHover(null)
+          onLinkHover({ from: link.from, to: link.to })
+        }}
+        onLinkClick={(linkObj) => {
+          onUserInteraction()
+          const link = linkObj as GraphLink3D
+          onLinkClick({ from: link.from, to: link.to })
+        }}
+        enableNodeDrag={false}
+        onEngineStop={() => fgRef.current?.zoomToFit(400, 40)}
+      />
+    </GraphMapErrorBoundary>
     <div className="graph-3d-actions">
-      <button type="button" className="chip" onClick={() => graphRef.current?.zoomToFit(400, 40)}>Подогнать вид</button>
-      <button type="button" className="chip" onClick={() => graphRef.current?.cameraPosition(RESET_CAMERA, { x: 0, y: 0, z: 0 }, 500)}>Сброс вида</button>
+      <button type="button" className="chip" onClick={() => fgRef.current?.zoomToFit(400, 40)}>Подогнать вид</button>
+      <button type="button" className="chip" onClick={() => fgRef.current?.cameraPosition(RESET_CAMERA, { x: 0, y: 0, z: 0 }, 500)}>Сброс вида</button>
     </div>
   </div>
 }

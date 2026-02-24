@@ -356,6 +356,7 @@ export function GraphPage() {
             setSelectedNodeId(null)
             setFocusRequest({ edge })
           }}
+          onOpenMatrix={() => setMode('matrix')}
         />
         {hoveredNodeId && hoverPoint && <div className="graph-hover-tip" style={{ left: hoverPoint.x + 14, top: hoverPoint.y - 10 }}>
           {(() => {
