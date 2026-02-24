@@ -11,6 +11,7 @@ import type { InfluenceMatrix, MetricVector, WeightsSource } from '../core/engin
 import {
   clearLearnedMatrices,
   getLearnedMatrix,
+  listCheckins,
   loadInfluenceMatrix,
   recomputeLearnedMatrix,
   resetInfluenceMatrix,
@@ -18,6 +19,7 @@ import {
 } from '../core/storage/repo'
 import { formatDateTime } from '../ui/format'
 import { LeversDecisionView } from './LeversDecisionView'
+import type { CheckinRecord } from '../core/models/checkin'
 
 type ViewMode = 'levers' | 'map' | 'matrix'
 interface GraphNode { id: MetricId; x?: number; y?: number }
@@ -62,11 +64,13 @@ export function GraphPage() {
   const [steps, setSteps] = useState<1 | 2 | 3>(2)
   const [testResult, setTestResult] = useState<MetricVector | null>(null)
   const [lastCheckSummary, setLastCheckSummary] = useState<string | null>(null)
+  const [checkins, setCheckins] = useState<CheckinRecord[]>([])
 
   useEffect(() => {
     void (async () => {
-      const [manual, learned] = await Promise.all([loadInfluenceMatrix(), getLearnedMatrix()])
+      const [manual, learned, loadedCheckins] = await Promise.all([loadInfluenceMatrix(), getLearnedMatrix(), listCheckins()])
       setManualMatrix(manual)
+      setCheckins(loadedCheckins)
       if (learned) {
         setLearnedMatrix(learned.weights)
         setStabilityMatrix(learned.stability)
@@ -285,6 +289,9 @@ export function GraphPage() {
         runImpulseTest={runImpulseTest}
         testResult={testResult}
         lastCheckSummary={lastCheckSummary}
+        mapAvailable
+        openMap={() => setMode('map')}
+        checkins={checkins}
       />
     </div>}
 

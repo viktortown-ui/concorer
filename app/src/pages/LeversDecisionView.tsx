@@ -1,8 +1,15 @@
 import { useMemo, useState } from 'react'
 import { METRICS, type MetricId } from '../core/metrics'
+import type { CheckinRecord } from '../core/models/checkin'
 import type { InfluenceEdge } from '../core/engines/influence/influence'
 import type { InfluenceMatrix, MetricVector } from '../core/engines/influence/types'
 import { SparkButton } from '../ui/SparkButton'
+import {
+  computeCentralityMetrics,
+  computeEarlyWarningSignals,
+  computeInfluenceConcentration,
+  computeRobustnessScore,
+} from './leversMonitor'
 
 interface LeverGroup {
   metric: MetricId
@@ -57,6 +64,32 @@ interface LeversDecisionViewProps {
   runImpulseTest: (metric: MetricId, value: number) => void
   testResult: MetricVector | null
   lastCheckSummary: string | null
+  mapAvailable: boolean
+  openMap: () => void
+  checkins: CheckinRecord[]
+}
+
+const DETAILS_OPEN_KEY = 'graph:accordion:details'
+const LAB_OPEN_KEY = 'graph:accordion:lab'
+const MONITOR_METRICS_KEY = 'graph:monitor:metrics'
+
+const readOpenFlag = (key: string, fallback = false) => {
+  const raw = window.localStorage.getItem(key)
+  if (!raw) return fallback
+  return raw === '1'
+}
+
+const parseMonitoredMetrics = (): MetricId[] => {
+  const fallback: MetricId[] = ['sleepHours', 'energy', 'stress']
+  const raw = window.localStorage.getItem(MONITOR_METRICS_KEY)
+  if (!raw) return fallback
+  try {
+    const parsed = JSON.parse(raw) as MetricId[]
+    const valid = parsed.filter((item): item is MetricId => METRICS.some((metric) => metric.id === item)).slice(0, 3)
+    return valid.length === 3 ? valid : fallback
+  } catch {
+    return fallback
+  }
 }
 
 function getReliabilityLabel(lever: LeverGroup, stabilityMatrix: InfluenceMatrix, learnedMatrix: InfluenceMatrix): string {
@@ -76,15 +109,6 @@ function getReliabilityLabel(lever: LeverGroup, stabilityMatrix: InfluenceMatrix
   if (avgAbsWeight >= 0.55 && hasLearnedEdge) return 'Высокая'
   if (avgAbsWeight >= 0.3 || hasLearnedEdge) return 'Средняя'
   return 'Низкая'
-}
-
-const DETAILS_OPEN_KEY = 'graph:accordion:details'
-const LAB_OPEN_KEY = 'graph:accordion:lab'
-
-const readOpenFlag = (key: string, fallback = false) => {
-  const raw = window.localStorage.getItem(key)
-  if (!raw) return fallback
-  return raw === '1'
 }
 
 export function LeversDecisionView(props: LeversDecisionViewProps) {
@@ -135,12 +159,18 @@ export function LeversDecisionView(props: LeversDecisionViewProps) {
     runImpulseTest,
     testResult,
     lastCheckSummary,
+    mapAvailable,
+    openMap,
+    checkins,
   } = props
 
   const [detailsOpen, setDetailsOpen] = useState(() => readOpenFlag(DETAILS_OPEN_KEY, true))
   const [labOpen, setLabOpen] = useState(() => readOpenFlag(LAB_OPEN_KEY, false))
   const [selectedLeverMetric, setSelectedLeverMetric] = useState<MetricId | null>(primaryLever?.metric ?? null)
   const [autoPickMessage, setAutoPickMessage] = useState('')
+  const [monitorMetrics, setMonitorMetrics] = useState<MetricId[]>(() => parseMonitoredMetrics())
+  const [highlightMetrics, setHighlightMetrics] = useState<MetricId[]>([])
+  const [showResilienceFormula, setShowResilienceFormula] = useState(false)
 
   const advisorLever = useMemo(() => {
     if (!selectedLeverMetric) return primaryLever
@@ -149,6 +179,13 @@ export function LeversDecisionView(props: LeversDecisionViewProps) {
 
   const rationaleEdges = advisorLever?.edges.slice(0, 3) ?? []
   const reliabilityLabel = advisorLever ? getReliabilityLabel(advisorLever, stabilityMatrix, learnedMatrix) : null
+  const centrality = useMemo(() => computeCentralityMetrics(visibleEdges), [visibleEdges])
+  const concentration = useMemo(() => computeInfluenceConcentration(centrality.centralityByMetric), [centrality])
+  const robustnessScore = useMemo(
+    () => computeRobustnessScore(visibleEdges, centrality.topCentrality.map((entry) => entry.metric)),
+    [centrality, visibleEdges],
+  )
+  const riskSignals = useMemo(() => computeEarlyWarningSignals(checkins, monitorMetrics, 14), [checkins, monitorMetrics])
 
   const sideEffectWarning = useMemo(() => {
     if (!advisorLever) return null
@@ -177,6 +214,22 @@ export function LeversDecisionView(props: LeversDecisionViewProps) {
     return 'Побочные эффекты не выражены, но наблюдайте метрики после проверки.'
   }, [advisorLever, forecastForMetric, stabilityMatrix])
 
+  const openDetailsFor = (metrics: MetricId[]) => {
+    setDetailsOpen(true)
+    window.localStorage.setItem(DETAILS_OPEN_KEY, '1')
+    setHighlightMetrics(metrics)
+    window.setTimeout(() => {
+      document.querySelector('.graph-accordion')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 30)
+  }
+
+  const handleMonitorMetricChange = (index: number, value: MetricId) => {
+    const next = [...monitorMetrics]
+    next[index] = value
+    setMonitorMetrics(next)
+    window.localStorage.setItem(MONITOR_METRICS_KEY, JSON.stringify(next))
+  }
+
   const runAutoPick = () => {
     if (allLevers.length === 0) {
       setAutoPickMessage('Не найдено кандидатов. Попробуйте снизить порог силы, включить «Смешанный» источник или добавить свежий чек-ин.')
@@ -185,6 +238,12 @@ export function LeversDecisionView(props: LeversDecisionViewProps) {
     setSelectedLeverMetric(allLevers[0].metric)
     setAutoPickMessage(`Подобран рычаг: ${METRICS.find((m) => m.id === allLevers[0].metric)?.labelRu ?? allLevers[0].metric}.`)
   }
+
+  const bottlenecks = [
+    { title: 'Драйверы', hint: 'больше всего влияет', items: centrality.topOutdegree },
+    { title: 'Уязвимые', hint: 'больше всего получает', items: centrality.topIndegree },
+    { title: 'Критические', hint: 'ключевой узел', items: centrality.topCentrality },
+  ]
 
   return <div className="levers-decision">
     <section className="graph-summary panel">
@@ -216,6 +275,37 @@ export function LeversDecisionView(props: LeversDecisionViewProps) {
           <p><strong>Надёжность подсказки:</strong> {reliabilityLabel}</p>
         </div>
       </>}
+    </section>
+
+    <section className="graph-monitor-row">
+      <article className="panel graph-monitor-card">
+        <h3>Узкие места</h3>
+        <ul>
+          {bottlenecks.map((block) => <li key={block.title}><strong>{block.title}:</strong> {(block.items[0] ? METRICS.find((m) => m.id === block.items[0].metric)?.labelRu : '—') ?? '—'} — {block.hint}.</li>)}
+        </ul>
+        <button type="button" className="chip" onClick={() => (mapAvailable ? openMap() : openDetailsFor(centrality.topCentrality.map((item) => item.metric)))}>{mapAvailable ? 'Показать на карте' : 'Открыть детали'}</button>
+      </article>
+
+      <article className="panel graph-monitor-card">
+        <h3>Сигналы риска</h3>
+        <div className="graph-monitor-settings">
+          {monitorMetrics.map((metric, index) => <select key={`${metric}-${index}`} value={metric} onChange={(event) => handleMonitorMetricChange(index, event.target.value as MetricId)}>{METRICS.map((item) => <option key={item.id} value={item.id}>{item.labelRu}</option>)}</select>)}
+        </div>
+        {!riskSignals.enoughData ? <p>Недостаточно данных: {riskSignals.current}/{riskSignals.required} чек-инов. Сделайте чек-ин.</p> : <>
+          <p><strong>{riskSignals.level}</strong></p>
+          <ul>{riskSignals.bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}</ul>
+          <p className="graph-meta-hint">Это статистические признаки, не гарантия кризиса.</p>
+        </>}
+        <button type="button" className="chip" onClick={() => openDetailsFor(monitorMetrics)}>Подробнее</button>
+      </article>
+
+      <article className="panel graph-monitor-card">
+        <h3>Устойчивость</h3>
+        <p><strong>Концентрация:</strong> {concentration.label} (топ-1: {(concentration.top1Share * 100).toFixed(0)}%, топ-3: {(concentration.top3Share * 100).toFixed(0)}%).</p>
+        <p><strong>Устойчивость:</strong> {robustnessScore.toFixed(2)}</p>
+        <button type="button" className="chip" onClick={() => setShowResilienceFormula((value) => !value)}>Как считается?</button>
+        {showResilienceFormula && <p className="graph-meta-hint">Берём 1–3 самых центральных узла, по очереди убираем их и считаем долю узлов в крупнейшей связной части. Среднее и есть оценка устойчивости.</p>}
+      </article>
     </section>
 
     <section>
@@ -259,7 +349,8 @@ export function LeversDecisionView(props: LeversDecisionViewProps) {
         <table className="table table--dense"><thead><tr><th>От</th><th>К</th><th>Сила связи</th><th>Уверенность</th><th>Волны влияния (не дни)</th><th>Смысл</th><th>Действие</th></tr></thead>
           <tbody>{visibleEdges.map((edge) => {
             const stability = stabilityMatrix[edge.from]?.[edge.to] ?? 0
-            return <tr key={`${edge.from}-${edge.to}`} onClick={() => setSelectedEdge({ from: edge.from, to: edge.to })} className={selectedEdge?.from === edge.from && selectedEdge?.to === edge.to ? 'row-active' : ''}><td>{METRICS.find((m) => m.id === edge.from)?.labelRu}</td><td>{METRICS.find((m) => m.id === edge.to)?.labelRu}</td><td>{edge.weight > 0 ? '+' : ''}{edge.weight.toFixed(2)}<div className="graph-meta-hint">Сила связи: насколько одно изменение тянет другое.</div></td><td>{stabilityLabel(stability)} ({stability.toFixed(2)})</td><td>{steps}</td><td>{edgeMeaning(edge)}</td><td><button type="button" className="chip" onClick={(event) => { event.stopPropagation(); triggerImpulseCheck(edge.from, edge.weight >= 0 ? 1 : -1) }}>Запустить проверку</button></td></tr>
+            const rowHighlight = highlightMetrics.includes(edge.from) || highlightMetrics.includes(edge.to)
+            return <tr key={`${edge.from}-${edge.to}`} onClick={() => setSelectedEdge({ from: edge.from, to: edge.to })} className={`${selectedEdge?.from === edge.from && selectedEdge?.to === edge.to ? 'row-active' : ''} ${rowHighlight ? 'row-monitor-focus' : ''}`}><td>{METRICS.find((m) => m.id === edge.from)?.labelRu}</td><td>{METRICS.find((m) => m.id === edge.to)?.labelRu}</td><td>{edge.weight > 0 ? '+' : ''}{edge.weight.toFixed(2)}<div className="graph-meta-hint">Сила связи: насколько одно изменение тянет другое.</div></td><td>{stabilityLabel(stability)} ({stability.toFixed(2)})</td><td>{steps}</td><td>{edgeMeaning(edge)}</td><td><button type="button" className="chip" onClick={(event) => { event.stopPropagation(); triggerImpulseCheck(edge.from, edge.weight >= 0 ? 1 : -1) }}>Запустить проверку</button></td></tr>
           })}</tbody></table>
       </div>
     </details>
