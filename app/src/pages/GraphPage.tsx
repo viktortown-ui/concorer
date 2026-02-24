@@ -61,6 +61,7 @@ export function GraphPage() {
   const [delta, setDelta] = useState(1)
   const [steps, setSteps] = useState<1 | 2 | 3>(2)
   const [testResult, setTestResult] = useState<MetricVector | null>(null)
+  const [lastCheckSummary, setLastCheckSummary] = useState<string | null>(null)
 
   useEffect(() => {
     void (async () => {
@@ -121,13 +122,23 @@ export function GraphPage() {
     setDelta(value)
     const base = metricIds.reduce((acc, id) => ({ ...acc, [id]: 5 }), {} as MetricVector)
     base.cashFlow = 0
-    setTestResult(applyImpulse(base, { [metric]: value }, activeMatrix, steps))
+    const result = applyImpulse(base, { [metric]: value }, activeMatrix, steps)
+    setTestResult(result)
+    const topEffects = METRICS
+      .filter((item) => item.id !== metric)
+      .map((item) => ({ label: item.labelRu, delta: result[item.id] - base[item.id] }))
+      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+      .slice(0, 2)
+      .map((item) => `${item.label} ${item.delta >= 0 ? '+' : ''}${item.delta.toFixed(1)}`)
+      .join(', ')
+    const leverLabel = METRICS.find((item) => item.id === metric)?.labelRu ?? metric
+    setLastCheckSummary(`при +1 к ${leverLabel} ожидается: ${topEffects} (волны: ${steps})`)
   }
 
-  const forecastForMetric = (metric: MetricId, impulse = 1) => {
+  const forecastForMetric = (metric: MetricId, impulse = 1, stepOverride?: 1 | 2 | 3) => {
     const base = metricIds.reduce((acc, id) => ({ ...acc, [id]: 5 }), {} as MetricVector)
     base.cashFlow = 0
-    const result = applyImpulse(base, { [metric]: impulse }, activeMatrix, steps)
+    const result = applyImpulse(base, { [metric]: impulse }, activeMatrix, stepOverride ?? steps)
     return METRICS
       .map((m) => ({ id: m.id, label: m.labelRu, delta: result[m.id] - base[m.id] }))
       .filter((row) => row.id !== metric)
@@ -230,6 +241,7 @@ export function GraphPage() {
       <LeversDecisionView
         primaryLever={primaryLever}
         alternatives={topLeversByMetric.slice(1, 4)}
+        allLevers={topLeversByMetric}
         forecastForMetric={forecastForMetric}
         triggerImpulseCheck={triggerImpulseCheck}
         applyEdgeAsScenario={applyEdgeAsScenario}
@@ -252,6 +264,7 @@ export function GraphPage() {
         setSelectedEdge={setSelectedEdge}
         stabilityLabel={stabilityLabel}
         stabilityMatrix={stabilityMatrix}
+        learnedMatrix={learnedMatrix}
         edgeMeaning={edgeMeaning}
         steps={steps}
         runRecompute={() => void recompute()}
@@ -271,6 +284,7 @@ export function GraphPage() {
         setSteps={setSteps}
         runImpulseTest={runImpulseTest}
         testResult={testResult}
+        lastCheckSummary={lastCheckSummary}
       />
     </div>}
 

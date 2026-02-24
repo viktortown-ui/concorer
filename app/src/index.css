@@ -2241,6 +2241,10 @@ button.danger { background: color-mix(in srgb, #e45959 30%, var(--panel) 70%); b
 .graph-summary__lead { margin-bottom: var(--space-1); }
 .graph-summary__effects { margin: 0 0 var(--space-2); padding-left: 18px; display: grid; gap: 2px; }
 .graph-summary__actions { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-bottom: var(--space-1); }
+.graph-summary__check { margin: 0 0 var(--space-2); padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--panel) 85%, #43f3d0 15%); }
+.graph-interpreter { border: 1px solid var(--line); border-radius: 10px; padding: var(--space-2); background: color-mix(in srgb, var(--panel) 88%, #9f7aea 12%); }
+.graph-interpreter h3 { margin-bottom: var(--space-1); }
+.graph-interpreter ul { margin: 0 0 var(--space-1); padding-left: 18px; }
 .graph-top3 { display: grid; gap: var(--space-2); grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: var(--space-2); }
 .graph-top3__card h3 { margin-bottom: var(--space-1); }
 .graph-table-wrap { max-height: 52vh; overflow: auto; border-radius: 10px; }
