@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { forceCenter, forceLink, forceManyBody, forceSimulation, forceX, forceY } from 'd3-force'
 import { METRICS, type MetricId } from '../core/metrics'
@@ -21,6 +21,7 @@ import { formatDateTime } from '../ui/format'
 
 type ViewMode = 'levers' | 'map' | 'matrix'
 interface GraphNode { id: MetricId; x?: number; y?: number }
+type QuickPreset = 'none' | 'strong' | 'positive' | 'negative' | 'confidence'
 
 function edgeMeaning(edge: InfluenceEdge): string {
   const fromLabel = METRICS.find((metric) => metric.id === edge.from)?.labelRu ?? edge.from
@@ -38,6 +39,7 @@ function stabilityLabel(score: number): string {
 
 export function GraphPage() {
   const navigate = useNavigate()
+  const impulseBlockRef = useRef<HTMLDivElement | null>(null)
   const [manualMatrix, setManualMatrix] = useState<InfluenceMatrix>(defaultInfluenceMatrix)
   const [learnedMatrix, setLearnedMatrix] = useState<InfluenceMatrix>(emptyInfluenceMatrix())
   const [stabilityMatrix, setStabilityMatrix] = useState<InfluenceMatrix>(emptyInfluenceMatrix())
@@ -54,6 +56,7 @@ export function GraphPage() {
   const [threshold, setThreshold] = useState(0.2)
   const [search, setSearch] = useState('')
   const [topN, setTopN] = useState(15)
+  const [quickPreset, setQuickPreset] = useState<QuickPreset>('none')
   const [impulseMetric, setImpulseMetric] = useState<MetricId>('sleepHours')
   const [delta, setDelta] = useState(1)
   const [steps, setSteps] = useState<1 | 2 | 3>(2)
@@ -81,6 +84,11 @@ export function GraphPage() {
     () => getTopEdges(activeMatrix, { source, target, sign, threshold, search, topN }),
     [activeMatrix, source, target, sign, threshold, search, topN],
   )
+
+  const visibleEdges = useMemo(() => {
+    if (quickPreset !== 'confidence') return topEdges
+    return topEdges.filter((edge) => (stabilityMatrix[edge.from]?.[edge.to] ?? 0) >= 0.7)
+  }, [quickPreset, stabilityMatrix, topEdges])
 
   const mapEdges = useMemo(
     () => getTopEdges(activeMatrix, { sign: 'all', threshold: 0.15, topN: Number.MAX_SAFE_INTEGER }),
@@ -116,6 +124,34 @@ export function GraphPage() {
     setTestResult(applyImpulse(base, { [metric]: value }, activeMatrix, steps))
   }
 
+  const forecastForMetric = (metric: MetricId, impulse = 1) => {
+    const base = metricIds.reduce((acc, id) => ({ ...acc, [id]: 5 }), {} as MetricVector)
+    base.cashFlow = 0
+    const result = applyImpulse(base, { [metric]: impulse }, activeMatrix, steps)
+    return METRICS
+      .map((m) => ({ id: m.id, label: m.labelRu, delta: result[m.id] - base[m.id] }))
+      .filter((row) => row.id !== metric)
+      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+      .slice(0, 3)
+  }
+
+  const topLeversByMetric = useMemo(() => {
+    const groups = new Map<MetricId, InfluenceEdge[]>()
+    visibleEdges.forEach((edge) => {
+      const current = groups.get(edge.from) ?? []
+      groups.set(edge.from, [...current, edge])
+    })
+    return Array.from(groups.entries())
+      .map(([metric, edges]) => ({
+        metric,
+        score: edges.reduce((sum, edge) => sum + Math.abs(edge.weight), 0),
+        edges: edges.sort((a, b) => b.absWeight - a.absWeight),
+      }))
+      .sort((a, b) => b.score - a.score)
+  }, [visibleEdges])
+
+  const primaryLever = topLeversByMetric[0]
+
   const recompute = async () => {
     const learned = await recomputeLearnedMatrix({ trainedOnDays, lags })
     setLearnedMatrix(learned.weights)
@@ -133,6 +169,21 @@ export function GraphPage() {
       mix,
     })
     navigate('/oracle?prefill=1')
+  }
+
+  const triggerImpulseCheck = (metric: MetricId, value: number) => {
+    runImpulseTest(metric, value)
+    impulseBlockRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  const applyQuickPreset = (preset: QuickPreset) => {
+    setQuickPreset(preset)
+    if (preset === 'strong') {
+      setThreshold(0.45)
+      setSign('all')
+    }
+    if (preset === 'positive') setSign('positive')
+    if (preset === 'negative') setSign('negative')
   }
 
   return <section className="page panel graph-page">
@@ -177,6 +228,41 @@ export function GraphPage() {
 
     <div className="graph-layout"><div>
       {mode === 'levers' && <>
+        <section className="graph-summary panel">
+          <h2>Главный рычаг сейчас</h2>
+          {!primaryLever ? <p>По текущим фильтрам рычаги не найдены. Ослабьте порог или знак.</p> : <>
+            <p className="graph-summary__lead"><strong>{METRICS.find((m) => m.id === primaryLever.metric)?.labelRu ?? primaryLever.metric}</strong> — если +1, сильнее всего меняются: {forecastForMetric(primaryLever.metric).slice(0, 2).map((item) => `${item.label} (${item.delta >= 0 ? '+' : ''}${item.delta.toFixed(1)})`).join(', ')}.</p>
+            <ul className="graph-summary__effects">
+              {forecastForMetric(primaryLever.metric).map((effect) => <li key={effect.id}>{effect.label}: {effect.delta >= 0 ? '+' : ''}{effect.delta.toFixed(1)}</li>)}
+            </ul>
+            <div className="graph-summary__actions">
+              <button type="button" className="chip" onClick={() => triggerImpulseCheck(primaryLever.metric, 1)}>Проверить импульсом</button>
+              <button type="button" className="chip" onClick={() => applyEdgeAsScenario(primaryLever.metric, primaryLever.edges[0].to, primaryLever.edges[0].weight)}>Применить как сценарий</button>
+            </div>
+            <details>
+              <summary>Почему так?</summary>
+              <ul>
+                {primaryLever.edges.slice(0, 3).map((edge) => <li key={`${edge.from}-${edge.to}`}>{METRICS.find((m) => m.id === edge.from)?.labelRu} → {METRICS.find((m) => m.id === edge.to)?.labelRu}: {edge.weight >= 0 ? '+' : ''}{edge.weight.toFixed(2)}</li>)}
+              </ul>
+            </details>
+          </>}
+        </section>
+
+        <section className="graph-top3">
+          {topLeversByMetric.slice(0, 3).map((lever) => {
+            const strongest = lever.edges[0]
+            const forecast = forecastForMetric(lever.metric)[0]
+            return <article key={lever.metric} className="graph-top3__card panel">
+              <h3>{METRICS.find((m) => m.id === lever.metric)?.labelRu ?? lever.metric}</h3>
+              <p>Краткий эффект: {forecast ? `${forecast.label} ${forecast.delta >= 0 ? '+' : ''}${forecast.delta.toFixed(1)}` : 'недостаточно данных'}</p>
+              <div className="graph-summary__actions">
+                <button type="button" className="chip" onClick={() => triggerImpulseCheck(lever.metric, 1)}>Проверить импульсом</button>
+                <button type="button" className="chip" onClick={() => applyEdgeAsScenario(lever.metric, strongest.to, strongest.weight)}>Применить как сценарий</button>
+              </div>
+            </article>
+          })}
+        </section>
+
         <div className="filters graph-filters">
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск по метрике" />
           <select value={source} onChange={(e) => setSource(e.target.value as MetricId | 'all')}><option value="all">Источник: все</option>{METRICS.map((m) => <option key={m.id} value={m.id}>{m.labelRu}</option>)}</select>
@@ -187,11 +273,20 @@ export function GraphPage() {
           <SparkButton type="button" onClick={() => void recompute()}>Переобучить</SparkButton>
           <button type="button" onClick={() => void clearLearnedMatrices()}>Очистить learned</button>
         </div>
-        <table className="table table--dense"><thead><tr><th>От</th><th>К</th><th>Вес</th><th>Уверенность</th><th>Смысл</th><th>Действие</th></tr></thead>
-          <tbody>{topEdges.map((edge) => {
-            const stability = stabilityMatrix[edge.from]?.[edge.to] ?? 0
-            return <tr key={`${edge.from}-${edge.to}`} onClick={() => setSelectedEdge({ from: edge.from, to: edge.to })} className={selectedEdge?.from === edge.from && selectedEdge?.to === edge.to ? 'row-active' : ''}><td>{METRICS.find((m) => m.id === edge.from)?.labelRu}</td><td>{METRICS.find((m) => m.id === edge.to)?.labelRu}</td><td>{edge.weight > 0 ? '+' : ''}{edge.weight.toFixed(2)}</td><td>{stabilityLabel(stability)} ({stability.toFixed(2)})</td><td>{edgeMeaning(edge)}</td><td><button type="button" className="chip" onClick={(event) => { event.stopPropagation(); runImpulseTest(edge.from, edge.weight >= 0 ? 1 : -1) }}>Проверить импульсом</button> <button type="button" className="chip" onClick={(event) => { event.stopPropagation(); applyEdgeAsScenario(edge.from, edge.to, edge.weight) }}>Применить как сценарий</button></td></tr>
-          })}</tbody></table>
+        <div className="preset-row">
+          <button type="button" className={quickPreset === 'strong' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => applyQuickPreset('strong')}>Сильные</button>
+          <button type="button" className={quickPreset === 'positive' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => applyQuickPreset('positive')}>Только +</button>
+          <button type="button" className={quickPreset === 'negative' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => applyQuickPreset('negative')}>Только −</button>
+          <button type="button" className={quickPreset === 'confidence' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => applyQuickPreset('confidence')}>Высокая уверенность</button>
+          <button type="button" className={quickPreset === 'none' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => setQuickPreset('none')}>Сброс</button>
+        </div>
+        <div className="graph-table-wrap">
+          <table className="table table--dense"><thead><tr><th>От</th><th>К</th><th title="Вес: сила влияния (− ослабляет, + усиливает)">Вес</th><th title="Уверенность learned-модели в связи">Уверенность</th><th title="Шаг: волна распространения влияний (не день)">Шаг</th><th>Смысл</th><th>Действие</th></tr></thead>
+            <tbody>{visibleEdges.map((edge) => {
+              const stability = stabilityMatrix[edge.from]?.[edge.to] ?? 0
+              return <tr key={`${edge.from}-${edge.to}`} onClick={() => setSelectedEdge({ from: edge.from, to: edge.to })} className={selectedEdge?.from === edge.from && selectedEdge?.to === edge.to ? 'row-active' : ''}><td>{METRICS.find((m) => m.id === edge.from)?.labelRu}</td><td>{METRICS.find((m) => m.id === edge.to)?.labelRu}</td><td>{edge.weight > 0 ? '+' : ''}{edge.weight.toFixed(2)}<div className="graph-meta-hint">Вес: сила влияния (− ослабляет, + усиливает)</div></td><td>{stabilityLabel(stability)} ({stability.toFixed(2)})</td><td>{steps}</td><td>{edgeMeaning(edge)}</td><td><button type="button" className="chip" onClick={(event) => { event.stopPropagation(); triggerImpulseCheck(edge.from, edge.weight >= 0 ? 1 : -1) }}>Проверить импульсом</button> <button type="button" className="chip" onClick={(event) => { event.stopPropagation(); applyEdgeAsScenario(edge.from, edge.to, edge.weight) }}>Применить как сценарий</button></td></tr>
+            })}</tbody></table>
+        </div>
       </>}
 
       {mode === 'map' && <svg viewBox="0 0 820 420" className="graph-canvas" role="img" aria-label="Карта влияния">{mapEdges.map((edge) => {
@@ -225,11 +320,14 @@ export function GraphPage() {
       </div>
     </aside></div>
 
-    <h2>Тест импульса</h2>
-    <label>Метрика<select value={impulseMetric} onChange={(e) => setImpulseMetric(e.target.value as MetricId)}>{metricIds.map((id) => <option key={id} value={id}>{METRICS.find((m) => m.id === id)?.labelRu}</option>)}</select></label>
-    <label>Δ<input type="number" value={delta} onChange={(e) => setDelta(Number(e.target.value))} /></label>
-    <label>Шаги<select value={steps} onChange={(e) => setSteps(Number(e.target.value) as 1 | 2 | 3)}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
-    <SparkButton type="button" onClick={() => runImpulseTest(impulseMetric, delta)}>Запустить</SparkButton>
-    {testResult && <p>Результат: {METRICS.map((m) => `${m.labelRu}: ${testResult[m.id].toFixed(1)}`).join(' | ')}</p>}
+    <div ref={impulseBlockRef} tabIndex={-1}>
+      <h2>Тест импульса</h2>
+      <p className="graph-meta-hint">Шаг: волна распространения влияний (не день)</p>
+      <label>Метрика<select value={impulseMetric} onChange={(e) => setImpulseMetric(e.target.value as MetricId)}>{metricIds.map((id) => <option key={id} value={id}>{METRICS.find((m) => m.id === id)?.labelRu}</option>)}</select></label>
+      <label>Δ<input type="number" value={delta} onChange={(e) => setDelta(Number(e.target.value))} /></label>
+      <label>Шаги<select value={steps} onChange={(e) => setSteps(Number(e.target.value) as 1 | 2 | 3)}>{[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}</select></label>
+      <SparkButton type="button" onClick={() => runImpulseTest(impulseMetric, delta)}>Запустить</SparkButton>
+      {testResult && <p>Результат: {METRICS.map((m) => `${m.labelRu}: ${testResult[m.id].toFixed(1)}`).join(' | ')}</p>}
+    </div>
   </section>
 }

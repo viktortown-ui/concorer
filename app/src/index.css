@@ -2236,3 +2236,17 @@ input:focus-visible {
 }
 .tools-card__open { min-height: 46px; margin-top: auto; }
 button.danger { background: color-mix(in srgb, #e45959 30%, var(--panel) 70%); border-color: color-mix(in srgb, #ff8b8b 60%, var(--line) 40%); }
+
+.graph-summary { margin-bottom: var(--space-2); }
+.graph-summary__lead { margin-bottom: var(--space-1); }
+.graph-summary__effects { margin: 0 0 var(--space-2); padding-left: 18px; display: grid; gap: 2px; }
+.graph-summary__actions { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-bottom: var(--space-1); }
+.graph-top3 { display: grid; gap: var(--space-2); grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: var(--space-2); }
+.graph-top3__card h3 { margin-bottom: var(--space-1); }
+.graph-table-wrap { max-height: 52vh; overflow: auto; border-radius: 10px; }
+.graph-meta-hint { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+@media (max-width: 1024px) {
+  .graph-top3 { grid-template-columns: 1fr; }
+  .graph-table-wrap { max-height: none; }
+}
