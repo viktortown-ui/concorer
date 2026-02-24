@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type ChangeEventHandler } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { clearAllData, exportDataBlob, importDataBlob, seedTestData } from '../core/storage/repo'
 import type { AccentColor, AppearanceSettings, DensityMode, MotionMode, ThemeMode, UiPreset, WorldQuality } from '../ui/appearance'
 import { SparkButton } from '../ui/SparkButton'
@@ -14,6 +15,18 @@ interface SettingsPageProps {
   onDataChanged: () => Promise<void>
   appearance: AppearanceSettings
   onAppearanceChange: (next: AppearanceSettings) => void
+}
+
+interface ToolCard {
+  id: string
+  title: string
+  benefit: string
+  path?: string
+  onOpen?: () => void
+  badges: string[]
+  category: 'Планирование и фокус' | 'Аналитика и прогноз' | 'Системный контроль'
+  favorite?: boolean
+  advanced?: boolean
 }
 
 function readFlag(key: string): boolean {
@@ -58,6 +71,7 @@ const presets: Array<{ id: UiPreset; title: string; description: string; accent:
 ]
 
 export function SettingsPage({ onDataChanged, appearance, onAppearanceChange }: SettingsPageProps) {
+  const navigate = useNavigate()
   const [worldOrbitDim, setWorldOrbitDim] = useState(() => readFlag('worldOrbitDim'))
   const [worldSelectiveBloom, setWorldSelectiveBloom] = useState(() => readFlag('worldSelectiveBloom'))
   const [worldShowAllOrbits, setWorldShowAllOrbits] = useState(() => readFlag('worldShowAllOrbits'))
@@ -70,6 +84,8 @@ export function SettingsPage({ onDataChanged, appearance, onAppearanceChange }: 
   const [worldDebugHUD, setWorldDebugHUD] = useState(() => readWorldDebugHUDFlag())
   const [restartHint, setRestartHint] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [advancedToolsOpen, setAdvancedToolsOpen] = useState(false)
+  const [toolsSearch, setToolsSearch] = useState('')
   const worldDeveloperUnlockClicksRef = useRef(0)
   const [worldDeveloperOverrideEnabled, setWorldDeveloperOverrideEnabled] = useState(() => readFlag('worldDeveloper'))
   const developerMode = resolveWorldDeveloperMode({ isDev: import.meta.env.DEV, worldDeveloper: worldDeveloperOverrideEnabled })
@@ -158,6 +174,52 @@ export function SettingsPage({ onDataChanged, appearance, onAppearanceChange }: 
     setWorldLutIntensity(0.44)
     setWorldDebugHUD(false)
     persistWorldSettings({ orbitDim: false, selectiveBloom: false, showAllOrbits: false, bloomPreset: 'normal', systemPreset: 'normal', lookPreset: 'clean', quality: 'standard', ao: false, lut: 0.44, hud: false })
+  }
+
+  const toolCards = useMemo<ToolCard[]>(() => [
+    { id: 'tool-world', title: 'Мир', benefit: 'Быстро видеть главное и запускать лучший следующий шаг.', path: '/world', badges: ['Основное', 'Навигация'], category: 'Планирование и фокус', favorite: true },
+    { id: 'tool-core', title: 'Чек-ин ядра', benefit: 'Фиксировать состояние и тренд за 1–2 минуты.', path: '/core', badges: ['Основное', 'Ежедневно'], category: 'Планирование и фокус', favorite: true },
+    { id: 'tool-goals', title: 'Цели', benefit: 'Держать приоритеты и не распыляться на второстепенное.', path: '/goals', badges: ['Основное'], category: 'Планирование и фокус' },
+    { id: 'tool-oracle', title: 'Оракул', benefit: 'Получать подсказки по решению в неочевидных ситуациях.', path: '/oracle', badges: ['Основное', 'AI-помощник'], category: 'Аналитика и прогноз', favorite: true },
+    { id: 'tool-dashboard', title: 'Дашборд', benefit: 'Смотреть метрики и динамику без лишних переходов.', path: '/dashboard', badges: ['Основное', 'Метрики'], category: 'Аналитика и прогноз' },
+    { id: 'tool-multiverse', title: 'Мульти', benefit: 'Сравнивать альтернативные сценарии перед решением.', path: '/multiverse', badges: ['Продвинутое', 'Сценарии'], category: 'Аналитика и прогноз', advanced: true },
+    { id: 'tool-black-swans', title: 'Чёрные лебеди', benefit: 'Проверять устойчивость к редким сильным рискам.', path: '/black-swans', badges: ['Продвинутое', 'Риск'], category: 'Аналитика и прогноз', advanced: true },
+    { id: 'tool-system', title: 'Система', benefit: 'Контролировать здоровье модели и сервисные показатели.', path: '/system', badges: ['Продвинутое', 'Диагностика'], category: 'Системный контроль', advanced: true },
+    { id: 'tool-export', title: 'Экспорт данных', benefit: 'Сохранять резервную копию перед важными изменениями.', onOpen: handleExport, badges: ['Основное', 'Безопасность'], category: 'Системный контроль', favorite: true },
+    { id: 'tool-reset', title: 'Сброс кэша', benefit: 'Быстро починить интерфейс, если всё тормозит.', onOpen: handleHardCacheReset, badges: ['Продвинутое', 'Техподдержка'], category: 'Системный контроль', advanced: true },
+  ], [handleExport])
+
+  const filteredTools = useMemo(() => {
+    const query = toolsSearch.trim().toLowerCase()
+    return toolCards.filter((tool) => {
+      if (!advancedToolsOpen && tool.advanced) return false
+      if (!query) return true
+      return [tool.title, tool.benefit, tool.category, ...tool.badges].join(' ').toLowerCase().includes(query)
+    })
+  }, [advancedToolsOpen, toolCards, toolsSearch])
+
+  const favoriteTools = filteredTools.filter((tool) => tool.favorite)
+  const categorizedTools = useMemo(() => {
+    const categories: ToolCard['category'][] = ['Планирование и фокус', 'Аналитика и прогноз', 'Системный контроль']
+    return categories.map((category) => ({
+      category,
+      items: filteredTools.filter((tool) => tool.category === category),
+    }))
+  }, [filteredTools])
+
+  const quickActions = [
+    { id: 'quick-world', label: 'Открыть Мир', action: () => navigate('/world') },
+    { id: 'quick-checkin', label: 'Сделать чек-ин', action: () => navigate('/core') },
+    { id: 'quick-export', label: 'Экспортировать данные', action: handleExport },
+    { id: 'quick-seed', label: 'Сгенерировать тестовые данные', action: handleSeed },
+  ]
+
+  const openTool = (tool: ToolCard) => {
+    if (tool.path) {
+      navigate(tool.path)
+      return
+    }
+    tool.onOpen?.()
   }
 
   const handleSettingsTitleClick = () => {
@@ -405,6 +467,63 @@ export function SettingsPage({ onDataChanged, appearance, onAppearanceChange }: 
           </div>
         </article>
       ) : null}
+
+      <article className="panel settings-card tools-hub" aria-label="Инструменты">
+        <div className="tools-hub__head">
+          <div>
+            <h2>Инструменты</h2>
+            <p>Витрина нужных действий: сначала основное, затем продвинутые инструменты.</p>
+          </div>
+          <button type="button" className="button-secondary tools-hub__advanced-toggle" onClick={() => setAdvancedToolsOpen((prev) => !prev)}>
+            {advancedToolsOpen ? 'Скрыть продвинутые' : 'Показать продвинутые'}
+          </button>
+        </div>
+        <label className="tools-hub__search" htmlFor="tools-search">
+          Поиск по инструментам
+          <input id="tools-search" type="search" value={toolsSearch} onChange={(event) => setToolsSearch(event.target.value)} placeholder="Например: риск, чек-ин, экспорт" />
+        </label>
+
+        <section className="tools-hub__quick" aria-label="Быстрые действия">
+          <h3>Быстрые действия</h3>
+          <div className="tools-hub__quick-grid">
+            {quickActions.map((item) => (
+              <button key={item.id} type="button" className="tools-hub__quick-action" onClick={item.action}>{item.label}</button>
+            ))}
+          </div>
+        </section>
+
+        <section aria-label="Избранное" className="tools-hub__favorites">
+          <h3>Избранное</h3>
+          <div className="tools-hub__grid">
+            {favoriteTools.map((tool) => (
+              <article key={tool.id} className="tools-card">
+                <h4>{tool.title}</h4>
+                <p>{tool.benefit}</p>
+                <div className="tools-card__badges">{tool.badges.map((badge) => <span key={badge}>{badge}</span>)}</div>
+                <button type="button" className="button-secondary tools-card__open" onClick={() => openTool(tool)}>Открыть</button>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        {categorizedTools.map(({ category, items }) => (
+          items.length ? (
+            <section key={category} className="tools-hub__category" aria-label={category}>
+              <h3>{category}</h3>
+              <div className="tools-hub__grid">
+                {items.map((tool) => (
+                  <article key={tool.id} className="tools-card">
+                    <h4>{tool.title}</h4>
+                    <p>{tool.benefit}</p>
+                    <div className="tools-card__badges">{tool.badges.map((badge) => <span key={badge}>{badge}</span>)}</div>
+                    <button type="button" className="button-secondary tools-card__open" onClick={() => openTool(tool)}>Открыть</button>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null
+        ))}
+      </article>
 
       <article className="panel settings-card">
         <h2>Данные</h2>
