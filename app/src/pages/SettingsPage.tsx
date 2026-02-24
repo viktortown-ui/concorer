@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ChangeEventHandler } from 'react'
+import { useCallback, useMemo, useRef, useState, type ChangeEventHandler } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { clearAllData, exportDataBlob, importDataBlob, seedTestData } from '../core/storage/repo'
 import type { AccentColor, AppearanceSettings, DensityMode, MotionMode, ThemeMode, UiPreset, WorldQuality } from '../ui/appearance'
@@ -128,7 +128,7 @@ export function SettingsPage({ onDataChanged, appearance, onAppearanceChange }: 
     await onDataChanged()
   }
 
-  const handleExport = async () => {
+  const handleExport = useCallback(async () => {
     const blob = await exportDataBlob()
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -137,7 +137,7 @@ export function SettingsPage({ onDataChanged, appearance, onAppearanceChange }: 
     link.download = `concorer-backup-${date}.json`
     link.click()
     URL.revokeObjectURL(url)
-  }
+  }, [])
 
   const handleImport: ChangeEventHandler<HTMLInputElement> = async (event) => {
     const file = event.target.files?.[0]

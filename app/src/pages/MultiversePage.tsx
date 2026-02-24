@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { METRICS, type MetricId } from '../core/metrics'
 import type { CheckinRecord } from '../core/models/checkin'
 import type { OracleScenarioDraft, WeightsSource } from '../core/engines/influence/types'
@@ -12,6 +13,9 @@ import { addQuest, getActiveGoal, getLearnedMatrix, listCheckins, loadInfluenceM
 import { getLatestForecastRun } from '../repo/forecastRepo'
 import { saveRun, getSettings, saveSettings } from '../repo/multiverseRepo'
 import { cancelMultiverseWorker, createMultiverseWorker, runMultiverseInWorker } from '../core/workers/multiverseClient'
+import { decodeContextFromQuery, weightsModeToSource, type DecisionContext } from '../core/decisionContext'
+import { sendEvent, onCommand, sendCommand, type ActivePlan } from '../core/commandBus'
+import { saveActivePlan } from '../repo/planRepo'
 
 function consumeDraft(): OracleScenarioDraft | null {
   const key = 'gamno.multiverseDraft'
@@ -23,13 +27,15 @@ function consumeDraft(): OracleScenarioDraft | null {
 }
 
 export function MultiversePage() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const [checkins, setCheckins] = useState<CheckinRecord[]>([])
   const [selectedBase, setSelectedBase] = useState<'latest' | number>('latest')
   const [source, setSource] = useState<WeightsSource>('mixed')
-  const [mix, setMix] = useState(0.5)
+  const [mix, setСмешивание] = useState(0.5)
   const [horizonDays, setHorizonDays] = useState<7 | 14 | 30>(14)
   const [runs, setRuns] = useState<1000 | 5000 | 10000 | 25000>(10000)
-  const [seed, setSeed] = useState(42)
+  const [seed, setСид] = useState(42)
   const [noiseEnabled, setNoiseEnabled] = useState(true)
   const [shockMode, setShockMode] = useState<'off' | 'normal' | 'blackSwan'>('normal')
   const [manualMetric, setManualMetric] = useState<MetricId>('sleepHours')
@@ -40,6 +46,7 @@ export function MultiversePage() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [ctx, setCtx] = useState<DecisionContext | null>(null)
 
   const workerRef = useRef<Worker | null>(null)
 
@@ -68,10 +75,21 @@ export function MultiversePage() {
       if (settings?.value) {
         setHorizonDays(settings.value.horizonDays)
         setRuns(settings.value.sims)
-        setSeed(settings.value.seed)
+        setСид(settings.value.seed)
         setSource(settings.value.weightsSource)
-        setMix(settings.value.mix)
+        setСмешивание(settings.value.mix)
         setShockMode(settings.value.useShockProfile ? 'normal' : 'off')
+      }
+      const queryCtx = decodeContextFromQuery(location.search)
+      if (queryCtx) {
+        setCtx(queryCtx)
+        setManualMetric((queryCtx.leverKey as MetricId) ?? 'sleepHours')
+        setManualDelta(queryCtx.delta)
+        if (queryCtx.horizonDays === 7 || queryCtx.horizonDays === 14 || queryCtx.horizonDays === 30) setHorizonDays(queryCtx.horizonDays)
+        setSource(weightsModeToSource(queryCtx.weightsMode))
+        if (queryCtx.mixValue !== undefined) setСмешивание(queryCtx.mixValue)
+        setNoiseEnabled(queryCtx.noiseLevel !== 'off')
+        if (queryCtx.shockProfile) setShockMode(queryCtx.shockProfile)
       }
       const draft = consumeDraft()
       if (draft?.baselineTs) setSelectedBase(draft.baselineTs)
@@ -82,9 +100,15 @@ export function MultiversePage() {
       }
     })
     return () => { cancelled = true; workerRef.current?.terminate() }
-  }, [])
+  }, [location.search])
 
   const baseline = useMemo(() => selectedBase === 'latest' ? checkins[0] : checkins.find((item) => item.ts === selectedBase) ?? checkins[0], [checkins, selectedBase])
+
+  useEffect(() => onCommand('runMultiverse', (commandCtx) => {
+    setCtx(commandCtx)
+    setManualMetric(commandCtx.leverKey as MetricId)
+    setManualDelta(commandCtx.delta)
+  }), [])
 
   async function run(planImpulses?: PlannedImpulse[]) {
     if (!baseline) return
@@ -126,7 +150,7 @@ export function MultiversePage() {
     workerRef.current = createMultiverseWorker((message) => {
       if (message.type === 'progress') setProgress({ done: message.done, total: message.total })
       if (message.type === 'error') { setError(message.message); setRunning(false) }
-      if (message.type === 'done') { setResult(message.result); setRunning(false) }
+      if (message.type === 'done') { setResult(message.result); setRunning(false); sendEvent('multiverseCompleted', { branchCount: message.result.branches.length }) }
       if (message.type === 'cancelled') setRunning(false)
     })
     runMultiverseInWorker(workerRef.current, config)
@@ -152,6 +176,24 @@ export function MultiversePage() {
       predictedIndexLift: (branch?.expectedIndex.at(-1) ?? 0) - (baseline ? computeIndexDay(baseline) : 0),
       goalId: activeGoal?.id,
     })
+    const nextPlan: ActivePlan = {
+      id: `plan-${Date.now()}`,
+      createdAt: Date.now(),
+      days: 3,
+      selectedBranchId: branch?.id ?? selectedBranch,
+      selectedBranchName: branch?.nameRu ?? 'Без названия',
+      ctx: ctx ?? {
+        sourceTool: 'multiverse',
+        leverKey: manualMetric,
+        delta: manualDelta,
+        horizonDays,
+        weightsMode: source === 'learned' ? 'из данных' : source === 'mixed' ? 'смешанный' : 'ручной',
+      },
+      recommendedActions: result?.actionLevers.slice(0, 3).map((item) => item.titleRu) ?? [],
+    }
+    await saveActivePlan(nextPlan)
+    sendCommand('acceptPlan', nextPlan)
+    sendEvent('planAccepted', nextPlan)
     window.alert('Ветка принята как план на 3 дня.')
   }
 
@@ -160,10 +202,18 @@ export function MultiversePage() {
     return (result.quantiles.index.p50.at(-1) ?? 0) - (beforeAction.quantiles.index.p50.at(-1) ?? 0)
   }, [beforeAction, result])
 
+  useEffect(() => {
+    if (!result) return
+    const total = result.branches.reduce((sum, branch) => sum + branch.probability, 0)
+    const deterministic = result.branches.some((branch) => branch.probability >= 0.999)
+    console.assert(Math.abs(total - 1) < 0.02 || deterministic, 'Проверка вероятностей: сумма должна быть близка к 100% или ветка детерминирована')
+  }, [result])
+
   return (
     <section className="page">
       <h1>Мультивселенная</h1>
       <p>Навигация по веткам будущего: рост, инерция и риск.</p>
+      {ctx ? <div className="panel"><p>Контекст получен из Рычагов: <strong>{ctx.leverKey}</strong> ({ctx.delta > 0 ? '+' : ''}{ctx.delta.toFixed(1)}), горизонт {ctx.horizonDays ?? horizonDays}.</p><button type="button" className="button-secondary" onClick={() => navigate('/graph')}>Вернуться к рычагам</button></div> : null}
 
       <div className="multiverse-grid">
         <article className="summary-card panel">
@@ -184,9 +234,9 @@ export function MultiversePage() {
           <h2>Контур расчёта</h2>
           <label>Горизонт<select value={horizonDays} onChange={(e) => setHorizonDays(Number(e.target.value) as 7 | 14 | 30)}><option value={7}>7 дней</option><option value={14}>14 дней</option><option value={30}>30 дней</option></select></label>
           <label>Симуляции<select value={runs} onChange={(e) => setRuns(Number(e.target.value) as 1000 | 5000 | 10000 | 25000)}><option value={1000}>1k</option><option value={5000}>5k</option><option value={10000}>10k</option><option value={25000}>25k</option></select></label>
-          <label>Seed<input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value) || 0)} /></label>
+          <label>Сид<input type="number" value={seed} onChange={(e) => setСид(Number(e.target.value) || 0)} /></label>
           <label>Источник весов<select value={source} onChange={(e) => setSource(e.target.value as WeightsSource)}><option value="manual">Ручной</option><option value="learned">Обученный</option><option value="mixed">Смешанный</option></select></label>
-          {source === 'mixed' ? <label>Mix {mix.toFixed(2)}<input type="range" min={0} max={1} step={0.05} value={mix} onChange={(e) => setMix(Number(e.target.value))} /></label> : null}
+          {source === 'mixed' ? <label>Смешивание {mix.toFixed(2)}<input type="range" min={0} max={1} step={0.05} value={mix} onChange={(e) => setСмешивание(Number(e.target.value))} /></label> : null}
           <label><input type="checkbox" checked={noiseEnabled} onChange={(e) => setNoiseEnabled(e.target.checked)} /> Шум прогноза</label>
           <label>Профиль шоков<select value={shockMode} onChange={(e) => setShockMode(e.target.value as 'off' | 'normal' | 'blackSwan')}><option value="off">Выключен</option><option value="normal">Нормальный</option><option value="blackSwan">Редкие тяжёлые</option></select></label>
           <label>Ручной рычаг<div className="settings-actions"><select value={manualMetric} onChange={(e) => setManualMetric(e.target.value as MetricId)}>{METRICS.map((m) => <option key={m.id} value={m.id}>{m.labelRu}</option>)}</select><input type="number" step="0.1" value={manualDelta} onChange={(e) => setManualDelta(Number(e.target.value) || 0)} /></div></label>
@@ -206,12 +256,13 @@ export function MultiversePage() {
             <article key={branch.id} className="summary-card panel">
               <h3>{branch.nameRu}</h3>
               <p>Вероятность: <strong>{(branch.probability * 100).toFixed(1)}%</strong></p>
+              <p>Почему так? <strong>{branch.probability >= 0.999 ? (noiseEnabled ? 'Ветка детерминирована: доминирует риск коллапса и высокий шум.' : 'Классификация детерминирована текущими ограничениями.') : 'Вероятность распределена между несколькими исходами.'}</strong></p>
               <p>Индекс (конец): <strong>{branch.expectedIndex.at(-1)?.toFixed(2)}</strong></p>
-              <p>P(collapse): <strong>{((branch.expectedPCollapse.at(-1) ?? 0) * 100).toFixed(1)}%</strong></p>
-              <p>GoalScore: <strong>{branch.goalScoreEnd.toFixed(1)}</strong> ({branch.goalScoreDelta >= 0 ? '+' : ''}{branch.goalScoreDelta.toFixed(2)})</p>
+              <p>Риск коллапса: <strong>{((branch.expectedPCollapse.at(-1) ?? 0) * 100).toFixed(1)}%</strong></p>
+              <p>Оценка цели: <strong>{branch.goalScoreEnd.toFixed(1)}</strong> ({branch.goalScoreDelta >= 0 ? '+' : ''}{branch.goalScoreDelta.toFixed(2)})</p>
               <p>Хвост: <strong>{branch.tailRiskChip}</strong></p>
-              <p>Debt pressure: <strong>{(branch.expectedPCollapse.at(-1) ?? 0) > (result.quantiles.pCollapse.p50.at(-1) ?? 0) ? 'растёт' : 'снижается'}</strong></p>
-              <p>Recovery pressure: <strong>{((branch.expectedPCollapse.at(-1) ?? 0) * 100).toFixed(1)}%</strong></p>
+              <p>Давление долга: <strong>{(branch.expectedPCollapse.at(-1) ?? 0) > (result.quantiles.pCollapse.p50.at(-1) ?? 0) ? 'растёт' : 'снижается'}</strong></p>
+              <p>Давление восстановления: <strong>{((branch.expectedPCollapse.at(-1) ?? 0) * 100).toFixed(1)}%</strong></p>
               <ul>{branch.topDrivers.map((driver) => <li key={driver}>{driver}</li>)}</ul>
               <button type="button" onClick={() => setSelectedBranch(branch.id)}>Выбрать ветку</button>
             </article>
