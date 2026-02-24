@@ -62,6 +62,7 @@ interface LeversDecisionViewProps {
   setDelta: (value: number) => void
   setSteps: (value: 1 | 2 | 3) => void
   runImpulseTest: (metric: MetricId, value: number) => void
+  runInMultiverse: (metric: MetricId, value: number) => void
   testResult: MetricVector | null
   lastCheckSummary: string | null
   mapAvailable: boolean
@@ -157,6 +158,7 @@ export function LeversDecisionView(props: LeversDecisionViewProps) {
     setDelta,
     setSteps,
     runImpulseTest,
+    runInMultiverse,
     testResult,
     lastCheckSummary,
     mapAvailable,
@@ -260,6 +262,7 @@ export function LeversDecisionView(props: LeversDecisionViewProps) {
         <div className="graph-summary__actions">
           <button type="button" className="chip" onClick={() => triggerImpulseCheck(advisorLever.metric, 1)}>Запустить проверку</button>
           <button type="button" className="chip" onClick={() => applyEdgeAsScenario(advisorLever.metric, advisorLever.edges[0].to, advisorLever.edges[0].weight)}>Применить как сценарий</button>
+          <button type="button" className="chip" onClick={() => runInMultiverse(advisorLever.metric, delta)}>Прогнать в Мультивселенной</button>
           <button type="button" className="chip" onClick={runAutoPick}>Найти лучший рычаг автоматически</button>
         </div>
         {autoPickMessage && <p className="graph-meta-hint">{autoPickMessage}</p>}

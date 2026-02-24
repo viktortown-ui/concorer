@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { getActivePlan, clearActivePlan } from '../repo/planRepo'
+import { onEvent, sendCommand, sendEvent, type ActivePlan } from '../core/commandBus'
 import { db } from '../core/storage/db'
 import { buildUnifiedActionCatalog } from '../core/actions/catalog'
 import type { ActionDomain } from '../core/actions/types'
@@ -77,6 +79,7 @@ export function WorldPage({ uiVariant = 'instrument', renderMode = 'webgl', look
   const [selectedPlanetId, setSelectedPlanetId] = useState<string | null>(() => getHashPlanetId())
   const [lastActionReason, setLastActionReason] = useState('Сделайте первый шаг: чек-ин или автопилот.')
   const [isRailCollapsed, setIsRailCollapsed] = useState<boolean>(() => readPanelCollapsed())
+  const [activePlan, setActivePlan] = useState<ActivePlan | null>(null)
   const lastOriginRef = useRef<HTMLElement | null>(null)
   const prevSelectedRef = useRef<string | null>(selectedPlanetId)
 
@@ -157,6 +160,16 @@ export function WorldPage({ uiVariant = 'instrument', renderMode = 'webgl', look
     return () => worldMapWorker.terminate()
   }, [])
 
+  useEffect(() => {
+    void getActivePlan().then(setActivePlan)
+    const unsubAccepted = onEvent('planAccepted', (plan) => setActivePlan(plan))
+    const unsubCleared = onEvent('planCleared', () => setActivePlan(null))
+    return () => {
+      unsubAccepted()
+      unsubCleared()
+    }
+  }, [])
+
   const replayFrame = frames[timelineIndex]?.payload ?? DEFAULT_WORLD_MAP_FRAME
 
   useEffect(() => {
@@ -168,7 +181,9 @@ export function WorldPage({ uiVariant = 'instrument', renderMode = 'webgl', look
       seed: 12,
       viewport: { width: 1600, height: 860, padding: 24 },
     })
-    return () => worldMapWorker.terminate()
+    return () => {
+      worldMapWorker.terminate()
+    }
   }, [replayFrame])
 
   const selectedPlanet = useMemo(() => worldMapSnapshot?.planets.find((planet) => planet.id === selectedPlanetId) ?? null, [selectedPlanetId, worldMapSnapshot])
@@ -319,9 +334,31 @@ export function WorldPage({ uiVariant = 'instrument', renderMode = 'webgl', look
                   <span key={signal.key} role="listitem"><strong>{signal.label}</strong> {signal.value}</span>
                 ))}
               </div>
+
+              {activePlan ? (
+                <div className="world-action-rail__active-plan">
+                  <p><strong>Активный план: 3 дня • Ветка: {activePlan.selectedBranchName}</strong></p>
+                  <div className="settings-actions">
+                    <button type="button" className="chip" onClick={() => navigate('/multiverse')}>Открыть план</button>
+                    <button
+                      type="button"
+                      className="chip"
+                      onClick={() => {
+                        void clearActivePlan().then(() => {
+                          setActivePlan(null)
+                          sendCommand('clearPlan', undefined)
+                          sendEvent('planCleared', undefined)
+                        })
+                      }}
+                    >
+                      Сбросить план
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <div className="world-action-rail__primary">
                 <button type="button" className="start-primary" onClick={handleNextAction}>
-                  {frames.length === 0 || !bestAction ? 'Сделать check-in' : bestAction.titleRu}
+                  {frames.length === 0 || !bestAction ? 'Сделать чек-ин' : bestAction.titleRu}
                 </button>
                 <p className="mono">Почему: {lastActionReason}</p>
               </div>
@@ -329,7 +366,7 @@ export function WorldPage({ uiVariant = 'instrument', renderMode = 'webgl', look
                 <summary>Подробнее</summary>
                 <ul>
                   {topActions.map((action) => (
-                    <li key={action.id}><strong>{action.titleRu}</strong> · риск {(action.failRate * 100).toFixed(1)}%</li>
+                    <li key={action.id}><strong>{action.titleRu}</strong> · частота сбоев {(action.failRate * 100).toFixed(1)}%</li>
                   ))}
                 </ul>
               </details>

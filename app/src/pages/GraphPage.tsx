@@ -20,6 +20,8 @@ import {
 import { formatDateTime } from '../ui/format'
 import { LeversDecisionView } from './LeversDecisionView'
 import type { CheckinRecord } from '../core/models/checkin'
+import { encodeContextToQuery, sourceToWeightsMode } from '../core/decisionContext'
+import { sendCommand } from '../core/commandBus'
 
 type ViewMode = 'levers' | 'map' | 'matrix'
 interface GraphNode { id: MetricId; x?: number; y?: number }
@@ -191,6 +193,23 @@ export function GraphPage() {
     impulseBlockRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
+
+  const runInMultiverse = (metric: MetricId, value: number) => {
+    const ctx = {
+      sourceTool: 'levers' as const,
+      leverKey: metric,
+      delta: value,
+      waves: steps,
+      horizonDays: 14,
+      weightsMode: sourceToWeightsMode(weightsSource),
+      mixValue: weightsSource === 'mixed' ? mix : undefined,
+      noiseLevel: 'on' as const,
+      shockProfile: 'normal' as const,
+    }
+    sendCommand('runMultiverse', ctx)
+    navigate({ pathname: '/multiverse', search: `?${encodeContextToQuery(ctx)}` })
+  }
+
   const applyQuickPreset = (preset: QuickPreset) => {
     setQuickPreset(preset)
     if (preset === 'strong') {
@@ -203,7 +222,11 @@ export function GraphPage() {
 
   return <section className="page panel graph-page">
     <h1>Граф влияний</h1>
-    <div className="settings-actions"><button type="button" onClick={() => { window.localStorage.setItem('gamno.multiverseDraft', JSON.stringify({ impulses: { [impulseMetric]: delta }, focusMetrics: [impulseMetric], sourceLabelRu: 'Контур из графа', weightsSource, mix })); navigate('/multiverse') }}>Открыть в Мультивселенной</button></div>
+    <div className="settings-actions"><button type="button" onClick={() => {
+      const ctx = { sourceTool: 'levers' as const, leverKey: impulseMetric, delta, waves: steps, horizonDays: 14, weightsMode: sourceToWeightsMode(weightsSource), mixValue: weightsSource === 'mixed' ? mix : undefined, noiseLevel: 'on' as const, shockProfile: 'normal' as const }
+      sendCommand('runMultiverse', ctx)
+      navigate(`/multiverse?${encodeContextToQuery(ctx)}`)
+    }}>Прогнать в Мультивселенной</button></div>
     <div className="mode-tabs">
       <button type="button" className={mode === 'levers' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => setMode('levers')}>Рычаги</button>
       <button type="button" className={mode === 'map' ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => setMode('map')}>Карта</button>
@@ -287,6 +310,7 @@ export function GraphPage() {
         setDelta={setDelta}
         setSteps={setSteps}
         runImpulseTest={runImpulseTest}
+        runInMultiverse={runInMultiverse}
         testResult={testResult}
         lastCheckSummary={lastCheckSummary}
         mapAvailable

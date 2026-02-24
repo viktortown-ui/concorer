@@ -23,7 +23,7 @@ describe('worldCockpit helpers', () => {
 
     expect(one).toEqual(two)
     expect(one.map((item) => item.key)).toEqual(['mode', 'safety', 'collapse', 'es', 'failRate', 'mission', 'trust'])
-    expect(one[1]?.value).toContain('SafeMode')
+    expect(one[1]?.value).toContain('Безопасный режим')
   })
 
   it('builds deterministic FX events from deterministic diff', () => {

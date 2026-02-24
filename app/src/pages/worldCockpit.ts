@@ -39,11 +39,11 @@ export function mapFrameToHudSignals(input: {
     {
       key: 'safety',
       label: 'Безопасность',
-      value: frame.regimeSnapshot.disarmProtocol.length ? 'SafeMode: ВКЛ' : `Сирена: ${String(frame.regimeSnapshot.sirenLevel).toUpperCase()}`,
+      value: frame.regimeSnapshot.disarmProtocol.length ? 'Безопасный режим: ВКЛ' : `Сирена: ${String(frame.regimeSnapshot.sirenLevel).toUpperCase()}`,
     },
-    { key: 'collapse', label: 'P(collapse)', value: toPercent(frame.regimeSnapshot.pCollapse) },
-    { key: 'es', label: 'ES(97.5)', value: toPercent(frame.tailRiskSummary.esCollapse10 ?? 0) },
-    { key: 'failRate', label: 'failRate', value: toPercent(failRate) },
+    { key: 'collapse', label: 'Риск коллапса', value: toPercent(frame.regimeSnapshot.pCollapse) },
+    { key: 'es', label: 'Тяжёлый риск (97.5%)', value: toPercent(frame.tailRiskSummary.esCollapse10 ?? 0) },
+    { key: 'failRate', label: 'Частота сбоев', value: toPercent(failRate) },
     { key: 'mission', label: 'Миссия', value: frame.goal.active?.title ?? 'Без активной цели' },
     { key: 'trust', label: 'Доверие модели', value: `${(trust?.grade ?? 'n/a').toUpperCase()} · ${trustReason}` },
   ]
