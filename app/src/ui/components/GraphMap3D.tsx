@@ -1,4 +1,4 @@
-import { Component, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { Component, type MutableRefObject, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import ForceGraph3D, { type ForceGraphMethods } from 'react-force-graph-3d'
 import { Sprite, SpriteMaterial, CanvasTexture, Color, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, SphereGeometry } from 'three'
 import { METRICS, type MetricId } from '../../core/metrics'
@@ -13,8 +13,8 @@ type GraphNode = {
 } & Record<string, unknown>
 
 type GraphLink = {
-  source: string | GraphNode
-  target: string | GraphNode
+  source: string | GraphNode3D
+  target: string | GraphNode3D
   weight?: number
   sign?: number
 } & Record<string, unknown>
@@ -135,7 +135,7 @@ export function GraphMap3D(props: GraphMap3DProps) {
   } = props
   const [webglReady] = useState(() => (typeof document === 'undefined' ? true : isWebglAvailable()))
   const [webglFailed, setWebglFailed] = useState(false)
-  const fgRef = useRef<ForceGraphMethods<GraphNode, GraphLink> | undefined>(undefined)
+  const fgRef = useRef<ForceGraphMethods<GraphNode3D, GraphLink> | null>(null)
   const idleTimer = useRef<number | null>(null)
   const [isInteracting, setIsInteracting] = useState(false)
 
@@ -183,7 +183,7 @@ export function GraphMap3D(props: GraphMap3DProps) {
     if (!graph || !focusRequest) return
     if (focusRequest.nodeId) {
       const targetNodeId = String(focusRequest.nodeId)
-      graph.zoomToFit(600, 60, (node) => String(node.id) == targetNodeId)
+      graph.zoomToFit(600, 60, (node) => String(node.id) === targetNodeId)
       const node = nodes.find((item) => item.id === focusRequest.nodeId)
       if (node?.x != null && node.y != null && node.z != null) {
         graph.cameraPosition({ x: node.x + 70, y: node.y + 50, z: node.z + 90 }, { x: node.x, y: node.y, z: node.z }, 600)
@@ -230,7 +230,7 @@ export function GraphMap3D(props: GraphMap3DProps) {
   return <div className="graph-3d-wrap" onMouseDown={onUserInteraction} onWheel={onUserInteraction}>
     <GraphMapErrorBoundary onError={() => setWebglFailed(true)}>
       <ForceGraph3D
-        ref={fgRef}
+        ref={fgRef as unknown as MutableRefObject<ForceGraphMethods<GraphNode3D, GraphLink> | undefined>}
         graphData={{ nodes, links }}
         width={820}
         height={420}
