@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react'
 import { METRICS, type MetricId } from '../core/metrics'
 import type { InfluenceEdge } from '../core/engines/influence/influence'
 import type { InfluenceMatrix, MetricVector } from '../core/engines/influence/types'
@@ -12,7 +13,8 @@ interface LeverGroup {
 interface LeversDecisionViewProps {
   primaryLever?: LeverGroup
   alternatives: LeverGroup[]
-  forecastForMetric: (metric: MetricId, impulse?: number) => Array<{ id: MetricId; label: string; delta: number }>
+  allLevers: LeverGroup[]
+  forecastForMetric: (metric: MetricId, impulse?: number, stepOverride?: 1 | 2 | 3) => Array<{ id: MetricId; label: string; delta: number }>
   triggerImpulseCheck: (metric: MetricId, value: number) => void
   applyEdgeAsScenario: (from: MetricId, to: MetricId, weight: number) => void
   search: string
@@ -34,6 +36,7 @@ interface LeversDecisionViewProps {
   setSelectedEdge: (edge: { from: MetricId; to: MetricId }) => void
   stabilityLabel: (score: number) => string
   stabilityMatrix: InfluenceMatrix
+  learnedMatrix: InfluenceMatrix
   edgeMeaning: (edge: InfluenceEdge) => string
   steps: 1 | 2 | 3
   runRecompute: () => void
@@ -53,12 +56,42 @@ interface LeversDecisionViewProps {
   setSteps: (value: 1 | 2 | 3) => void
   runImpulseTest: (metric: MetricId, value: number) => void
   testResult: MetricVector | null
+  lastCheckSummary: string | null
+}
+
+function getReliabilityLabel(lever: LeverGroup, stabilityMatrix: InfluenceMatrix, learnedMatrix: InfluenceMatrix): string {
+  const topEdges = lever.edges.slice(0, 3)
+  const knownConfidence = topEdges
+    .map((edge) => stabilityMatrix[edge.from]?.[edge.to] ?? 0)
+    .filter((value) => value > 0)
+  if (knownConfidence.length > 0) {
+    const avgConfidence = knownConfidence.reduce((sum, value) => sum + value, 0) / knownConfidence.length
+    if (avgConfidence >= 0.7) return 'Высокая'
+    if (avgConfidence >= 0.4) return 'Средняя'
+    return 'Низкая'
+  }
+
+  const avgAbsWeight = topEdges.reduce((sum, edge) => sum + Math.abs(edge.weight), 0) / Math.max(topEdges.length, 1)
+  const hasLearnedEdge = topEdges.some((edge) => Math.abs(learnedMatrix[edge.from]?.[edge.to] ?? 0) > 0.05)
+  if (avgAbsWeight >= 0.55 && hasLearnedEdge) return 'Высокая'
+  if (avgAbsWeight >= 0.3 || hasLearnedEdge) return 'Средняя'
+  return 'Низкая'
+}
+
+const DETAILS_OPEN_KEY = 'graph:accordion:details'
+const LAB_OPEN_KEY = 'graph:accordion:lab'
+
+const readOpenFlag = (key: string, fallback = false) => {
+  const raw = window.localStorage.getItem(key)
+  if (!raw) return fallback
+  return raw === '1'
 }
 
 export function LeversDecisionView(props: LeversDecisionViewProps) {
   const {
     primaryLever,
     alternatives,
+    allLevers,
     forecastForMetric,
     triggerImpulseCheck,
     applyEdgeAsScenario,
@@ -81,6 +114,7 @@ export function LeversDecisionView(props: LeversDecisionViewProps) {
     setSelectedEdge,
     stabilityLabel,
     stabilityMatrix,
+    learnedMatrix,
     edgeMeaning,
     steps,
     runRecompute,
@@ -100,26 +134,87 @@ export function LeversDecisionView(props: LeversDecisionViewProps) {
     setSteps,
     runImpulseTest,
     testResult,
+    lastCheckSummary,
   } = props
+
+  const [detailsOpen, setDetailsOpen] = useState(() => readOpenFlag(DETAILS_OPEN_KEY, true))
+  const [labOpen, setLabOpen] = useState(() => readOpenFlag(LAB_OPEN_KEY, false))
+  const [selectedLeverMetric, setSelectedLeverMetric] = useState<MetricId | null>(primaryLever?.metric ?? null)
+  const [autoPickMessage, setAutoPickMessage] = useState('')
+
+  const advisorLever = useMemo(() => {
+    if (!selectedLeverMetric) return primaryLever
+    return allLevers.find((lever) => lever.metric === selectedLeverMetric) ?? primaryLever
+  }, [allLevers, primaryLever, selectedLeverMetric])
+
+  const rationaleEdges = advisorLever?.edges.slice(0, 3) ?? []
+  const reliabilityLabel = advisorLever ? getReliabilityLabel(advisorLever, stabilityMatrix, learnedMatrix) : null
+
+  const sideEffectWarning = useMemo(() => {
+    if (!advisorLever) return null
+    const firstWave = forecastForMetric(advisorLever.metric, 1, 1)
+    const secondWave = forecastForMetric(advisorLever.metric, 1, 2)
+    const secondOrder = secondWave
+      .map((effect) => {
+        const stepOne = firstWave.find((row) => row.id === effect.id)?.delta ?? 0
+        return { ...effect, secondOrderDelta: effect.delta - stepOne }
+      })
+      .sort((a, b) => a.secondOrderDelta - b.secondOrderDelta)
+
+    const negative = secondOrder.find((effect) => effect.secondOrderDelta < 0)
+    if (negative) {
+      return `На второй волне может просесть «${negative.label}» (${negative.secondOrderDelta.toFixed(1)}).`
+    }
+
+    const uncertainEdge = advisorLever.edges
+      .map((edge) => ({ edge, confidence: stabilityMatrix[edge.from]?.[edge.to] ?? 0 }))
+      .sort((a, b) => a.confidence - b.confidence)[0]
+    if (uncertainEdge) {
+      const label = METRICS.find((m) => m.id === uncertainEdge.edge.to)?.labelRu ?? uncertainEdge.edge.to
+      return `Есть неопределённость по влиянию на «${label}» (уверенность ${uncertainEdge.confidence.toFixed(2)}).`
+    }
+
+    return 'Побочные эффекты не выражены, но наблюдайте метрики после проверки.'
+  }, [advisorLever, forecastForMetric, stabilityMatrix])
+
+  const runAutoPick = () => {
+    if (allLevers.length === 0) {
+      setAutoPickMessage('Не найдено кандидатов. Попробуйте снизить порог силы, включить «Смешанный» источник или добавить свежий чек-ин.')
+      return
+    }
+    setSelectedLeverMetric(allLevers[0].metric)
+    setAutoPickMessage(`Подобран рычаг: ${METRICS.find((m) => m.id === allLevers[0].metric)?.labelRu ?? allLevers[0].metric}.`)
+  }
 
   return <div className="levers-decision">
     <section className="graph-summary panel">
       <h2>Лучший рычаг сейчас</h2>
-      {!primaryLever ? <p>По текущим условиям рычаги не найдены. Ослабьте фильтры.</p> : <>
-        <p className="graph-summary__lead">Если улучшить <strong>{METRICS.find((m) => m.id === primaryLever.metric)?.labelRu ?? primaryLever.metric}</strong> на +1, сильнее всего изменится: {forecastForMetric(primaryLever.metric).slice(0, 2).map((item) => `${item.label} (${item.delta >= 0 ? '+' : ''}${item.delta.toFixed(1)})`).join(', ')}.</p>
+      {!advisorLever ? <>
+        <p>По текущим условиям рычаги не найдены. Ослабьте фильтры.</p>
+        <button type="button" className="chip" onClick={runAutoPick}>Найти лучший рычаг автоматически</button>
+        {autoPickMessage && <p className="graph-meta-hint">{autoPickMessage}</p>}
+      </> : <>
+        <p className="graph-summary__lead">Если улучшить <strong>{METRICS.find((m) => m.id === advisorLever.metric)?.labelRu ?? advisorLever.metric}</strong> на +1, сильнее всего изменится: {forecastForMetric(advisorLever.metric).slice(0, 2).map((item) => `${item.label} (${item.delta >= 0 ? '+' : ''}${item.delta.toFixed(1)})`).join(', ')}.</p>
         <ul className="graph-summary__effects">
-          {forecastForMetric(primaryLever.metric).map((effect) => <li key={effect.id}>{effect.label}: {effect.delta >= 0 ? '+' : ''}{effect.delta.toFixed(1)}</li>)}
+          {forecastForMetric(advisorLever.metric).map((effect) => <li key={effect.id}>{effect.label}: {effect.delta >= 0 ? '+' : ''}{effect.delta.toFixed(1)}</li>)}
         </ul>
         <div className="graph-summary__actions">
-          <button type="button" className="chip" onClick={() => triggerImpulseCheck(primaryLever.metric, 1)}>Запустить проверку</button>
-          <button type="button" className="chip" onClick={() => applyEdgeAsScenario(primaryLever.metric, primaryLever.edges[0].to, primaryLever.edges[0].weight)}>Применить как сценарий</button>
+          <button type="button" className="chip" onClick={() => triggerImpulseCheck(advisorLever.metric, 1)}>Запустить проверку</button>
+          <button type="button" className="chip" onClick={() => applyEdgeAsScenario(advisorLever.metric, advisorLever.edges[0].to, advisorLever.edges[0].weight)}>Применить как сценарий</button>
+          <button type="button" className="chip" onClick={runAutoPick}>Найти лучший рычаг автоматически</button>
         </div>
-        <details>
-          <summary>Почему так?</summary>
+        {autoPickMessage && <p className="graph-meta-hint">{autoPickMessage}</p>}
+        {lastCheckSummary && <p className="graph-summary__check"><strong>Проверка:</strong> {lastCheckSummary}</p>}
+
+        <div className="graph-interpreter">
+          <h3>Интерпретатор</h3>
+          <p><strong>Почему система так считает:</strong></p>
           <ul>
-            {primaryLever.edges.slice(0, 3).map((edge) => <li key={`${edge.from}-${edge.to}`}>{METRICS.find((m) => m.id === edge.from)?.labelRu} → {METRICS.find((m) => m.id === edge.to)?.labelRu}: {edge.weight >= 0 ? '+' : ''}{edge.weight.toFixed(2)}</li>)}
+            {rationaleEdges.map((edge) => <li key={`${edge.from}-${edge.to}`}>{METRICS.find((m) => m.id === edge.from)?.labelRu} → {METRICS.find((m) => m.id === edge.to)?.labelRu}: {edge.weight >= 0 ? '+' : ''}{edge.weight.toFixed(2)}</li>)}
           </ul>
-        </details>
+          <p><strong>Возможная побочка:</strong> {sideEffectWarning}</p>
+          <p><strong>Надёжность подсказки:</strong> {reliabilityLabel}</p>
+        </div>
       </>}
     </section>
 
@@ -137,8 +232,12 @@ export function LeversDecisionView(props: LeversDecisionViewProps) {
       </div>
     </section>
 
-    <details className="panel graph-accordion">
-      <summary>Детали карты</summary>
+    <details className="panel graph-accordion" open={detailsOpen} onToggle={(event) => {
+      const open = event.currentTarget.open
+      setDetailsOpen(open)
+      window.localStorage.setItem(DETAILS_OPEN_KEY, open ? '1' : '0')
+    }}>
+      <summary>Детали карты ({visibleEdges.length} связей · фильтры активны)</summary>
       <div className="filters graph-filters">
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск по метрике" />
         <select value={source} onChange={(e) => setSource(e.target.value as MetricId | 'all')}><option value="all">Источник: все</option>{METRICS.map((m) => <option key={m.id} value={m.id}>{m.labelRu}</option>)}</select>
@@ -165,8 +264,12 @@ export function LeversDecisionView(props: LeversDecisionViewProps) {
       </div>
     </details>
 
-    <details className="panel graph-accordion">
-      <summary>Лаборатория</summary>
+    <details className="panel graph-accordion" open={labOpen} onToggle={(event) => {
+      const open = event.currentTarget.open
+      setLabOpen(open)
+      window.localStorage.setItem(LAB_OPEN_KEY, open ? '1' : '0')
+    }}>
+      <summary>Лаборатория (3 инструмента · инспектор и проверка)</summary>
       <div className="inspector-in-panel">
         <h3>Инспектор связи</h3>
         {!selectedEdge ? <p>Выберите связь в таблице.</p> : <>
