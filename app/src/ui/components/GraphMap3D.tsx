@@ -179,32 +179,53 @@ export function GraphMap3D(props: GraphMap3DProps) {
   }, [links])
 
   useEffect(() => {
-    const graph = fgRef.current
-    if (!graph || !focusRequest) return
-    if (focusRequest.nodeId) {
-      const targetNodeId = String(focusRequest.nodeId)
-      graph.zoomToFit(600, 60, (node) => String(node.id) === targetNodeId)
-      const node = nodes.find((item) => item.id === focusRequest.nodeId)
-      if (node?.x != null && node.y != null && node.z != null) {
-        graph.cameraPosition({ x: node.x + 70, y: node.y + 50, z: node.z + 90 }, { x: node.x, y: node.y, z: node.z }, 600)
-      }
+  const graph = fgRef.current
+  if (!graph || !focusRequest) return
+
+  // focus node
+  if (focusRequest.nodeId) {
+    const targetNodeId = String(focusRequest.nodeId)
+
+    graph.zoomToFit(600, 60, (n) => String((n as GraphNode3D).id) === targetNodeId)
+
+    const node = nodes.find((it) => String(it.id) === targetNodeId)
+    if (node?.x != null && node?.y != null && node?.z != null) {
+      graph.cameraPosition(
+        { x: node.x + 70, y: node.y + 50, z: node.z + 90 },
+        { x: node.x, y: node.y, z: node.z },
+        600
+      )
     }
-    if (focusRequest.edge) {
-      const fromId = String(focusRequest.edge.from)
-      const toId = String(focusRequest.edge.to)
-      graph.zoomToFit(600, 60, (node) => {
-        const id = String(node.id)
-        return id === fromId || id === toId
-      })
-      const source = nodes.find((item) => item.id === focusRequest.edge?.from)
-      const target = nodes.find((item) => item.id === focusRequest.edge?.to)
-      if (source?.x != null && source.y != null && source.z != null && target?.x != null && target.y != null && target.z != null) {
-        const point = {
-          x: (source.x + target.x) / 2,
-          y: (source.y + target.y) / 2,
-          z: (source.z + target.z) / 2,
-        }
-        graph.cameraPosition({ x: point.x + 80, y: point.y + 80, z: point.z + 120 }, point, 600)
+    return
+  }
+
+  // focus edge
+  if (focusRequest.edge) {
+    const fromId = String(focusRequest.edge.from)
+    const toId = String(focusRequest.edge.to)
+
+    graph.zoomToFit(600, 60, (n) => {
+      const id = String((n as GraphNode3D).id)
+      return id === fromId || id === toId
+    })
+
+    const source = nodes.find((it) => String(it.id) === fromId)
+    const target = nodes.find((it) => String(it.id) === toId)
+
+    if (
+      source?.x != null && source?.y != null && source?.z != null &&
+      target?.x != null && target?.y != null && target?.z != null
+    ) {
+      const point = {
+        x: (source.x + target.x) / 2,
+        y: (source.y + target.y) / 2,
+        z: (source.z + target.z) / 2,
+      }
+      graph.cameraPosition({ x: point.x + 80, y: point.y + 80, z: point.z + 120 }, point, 700)
+    }
+  }
+}, [focusRequest, nodes])
+
       }
     }
   }, [focusRequest, nodes])
@@ -230,7 +251,7 @@ export function GraphMap3D(props: GraphMap3DProps) {
   return <div className="graph-3d-wrap" onMouseDown={onUserInteraction} onWheel={onUserInteraction}>
     <GraphMapErrorBoundary onError={() => setWebglFailed(true)}>
       <ForceGraph3D
-        ref={fgRef as unknown as MutableRefObject<ForceGraphMethods<GraphNode3D, GraphLink> | undefined>}
+        ref={fgRef}
         graphData={{ nodes, links }}
         width={820}
         height={420}
