@@ -3,9 +3,26 @@ import type { ActivePlan } from '../core/commandBus'
 
 const PLAN_KEY = 'activePlanV1'
 
-function settingsTable() {
-  return (db as { settings?: { put: Function; get: Function; delete: Function }; table?: (name: string) => { put: Function; get: Function; delete: Function } }).settings
-    ?? (db as { table?: (name: string) => { put: Function; get: Function; delete: Function } }).table?.('settings')
+interface PlanSettingsRecord {
+  key: string
+  value: unknown
+  updatedAt: number
+}
+
+interface PlanSettingsTable {
+  put: (value: PlanSettingsRecord) => Promise<unknown>
+  get: (key: string) => Promise<{ value?: unknown } | undefined>
+  delete: (key: string) => Promise<unknown>
+}
+
+interface DbLikeWithSettings {
+  settings?: PlanSettingsTable
+  table?: (name: string) => PlanSettingsTable
+}
+
+function settingsTable(): PlanSettingsTable | undefined {
+  const typedDb = db as unknown as DbLikeWithSettings
+  return typedDb.settings ?? typedDb.table?.('settings')
 }
 
 export async function saveActivePlan(plan: ActivePlan): Promise<void> {
