@@ -2246,6 +2246,13 @@ button.danger { background: color-mix(in srgb, #e45959 30%, var(--panel) 70%); b
 .graph-interpreter h3 { margin-bottom: var(--space-1); }
 .graph-interpreter ul { margin: 0 0 var(--space-1); padding-left: 18px; }
 .graph-top3 { display: grid; gap: var(--space-2); grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: var(--space-2); }
+
+.graph-monitor-row { display: grid; gap: var(--space-2); grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.graph-monitor-card { display: grid; gap: var(--space-1); align-content: start; }
+.graph-monitor-card h3 { margin-bottom: 2px; }
+.graph-monitor-card ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.graph-monitor-settings { display: grid; gap: 6px; }
+.row-monitor-focus { outline: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line) 45%); outline-offset: -1px; }
 .graph-top3__card h3 { margin-bottom: var(--space-1); }
 .graph-table-wrap { max-height: 52vh; overflow: auto; border-radius: 10px; }
 .graph-meta-hint { color: var(--muted); font-size: 11px; margin-top: 2px; }
@@ -2257,5 +2264,6 @@ button.danger { background: color-mix(in srgb, #e45959 30%, var(--panel) 70%); b
 
 @media (max-width: 1024px) {
   .graph-top3 { grid-template-columns: 1fr; }
+  .graph-monitor-row { grid-template-columns: 1fr; }
   .graph-table-wrap { max-height: none; }
 }
