@@ -1,4 +1,4 @@
-import { Component, type MutableRefObject, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { Component, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import ForceGraph3D, { type ForceGraphMethods } from 'react-force-graph-3d'
 import { Sprite, SpriteMaterial, CanvasTexture, Color, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, SphereGeometry } from 'three'
 import { METRICS, type MetricId } from '../../core/metrics'
