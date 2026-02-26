@@ -17,6 +17,7 @@ import {
 } from '../core/storage/repo'
 import { evaluateGoalScore, suggestGoalActions, type GoalStateInput } from '../core/engines/goal'
 import { getLatestForecastRun } from '../repo/forecastRepo'
+import { GoalYggdrasilTree, type BranchStrength } from '../ui/components/GoalYggdrasilTree'
 
 type GoalTemplateId = 'growth' | 'anti-storm' | 'energy-balance' | 'money'
 
@@ -51,14 +52,35 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value))
 }
 
-function createKrFromMetric(metricId: MetricId, weight: number, index: number): GoalKeyResult {
+function createKrFromMetric(metricId: MetricId, direction: 'up' | 'down', index: number, note: string): GoalKeyResult {
   return {
     id: `kr-${metricId}-${index}`,
     metricId,
-    direction: weight >= 0 ? 'up' : 'down',
+    direction,
     progressMode: 'auto',
-    note: 'Создано из веса метрики.',
+    note,
   }
+}
+
+function ensureGoalKeyResults(goal: GoalRecord, goalState: GoalStateInput | null): GoalKeyResult[] {
+  if (goal.okr.keyResults.length > 0) {
+    return goal.okr.keyResults.slice(0, 5)
+  }
+
+  const fallbackMetrics: Array<{ metricId: MetricId; direction: 'up' | 'down' }> = [
+    { metricId: 'energy', direction: 'up' },
+    { metricId: 'sleepHours', direction: 'up' },
+    { metricId: 'stress', direction: 'down' },
+  ]
+
+  const hasData = goalState ? fallbackMetrics.every((row) => typeof goalState.metrics[row.metricId] === 'number') : false
+  if (hasData) {
+    return fallbackMetrics.map((row, index) => createKrFromMetric(row.metricId, row.direction, index, 'Временная ветвь из текущих метрик.'))
+  }
+
+  return Object.entries(goal.weights)
+    .slice(0, 3)
+    .map(([metricId, weight], index) => createKrFromMetric(metricId as MetricId, (weight ?? 0) >= 0 ? 'up' : 'down', index, 'Создано из веса метрики.'))
 }
 
 export function GoalsPage() {
@@ -121,7 +143,7 @@ export function GoalsPage() {
 
     setGoalState(currentState)
 
-    if (picked?.id && currentState) {
+    if (picked?.id) {
       const rows = await listGoalEvents(picked.id, 2)
       setHistoryTrend(rows.length >= 2 && rows[0].goalScore >= rows[1].goalScore ? 'up' : rows.length >= 2 ? 'down' : null)
     }
@@ -192,8 +214,7 @@ export function GoalsPage() {
 
     const node = seedDialogRef.current
     const focusable = node ? Array.from(node.querySelectorAll<HTMLElement>(focusableSelectors)) : []
-    const firstFocusable = focusable[0]
-    firstFocusable?.focus()
+    focusable[0]?.focus()
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (!seedModalOpen) return
@@ -238,7 +259,7 @@ export function GoalsPage() {
     const tpl = templates[seedTemplate]
     const keyResults = Object.entries(tpl.weights)
       .slice(0, 3)
-      .map(([metricId, weight], index) => createKrFromMetric(metricId as MetricId, weight ?? 0, index))
+      .map(([metricId, weight], index) => createKrFromMetric(metricId as MetricId, (weight ?? 0) >= 0 ? 'up' : 'down', index, 'Создано из шаблона.'))
 
     const created = await createGoal({
       title: normalizedTitle,
@@ -257,13 +278,14 @@ export function GoalsPage() {
     await reload()
   }
 
-  const krProgressRows = useMemo(() => {
-    if (!selected || !goalState) return []
-    const fallbackKrs = selected.okr.keyResults.length > 0
-      ? selected.okr.keyResults
-      : Object.entries(selected.weights).slice(0, 3).map(([metricId, weight], index) => createKrFromMetric(metricId as MetricId, weight ?? 0, index))
+  const selectedKrs = useMemo(() => {
+    if (!selected) return []
+    return ensureGoalKeyResults(selected, goalState)
+  }, [selected, goalState])
 
-    return fallbackKrs.map((kr) => {
+  const krProgressRows = useMemo(() => {
+    if (!goalState) return []
+    return selectedKrs.map((kr) => {
       const metric = METRICS.find((item) => item.id === kr.metricId)
       const metricValue = goalState.metrics[kr.metricId]
       const baseProgress = metric
@@ -278,34 +300,51 @@ export function GoalsPage() {
         ? clamp01(kr.progress)
         : targetProgress
 
-      return { kr, metricValue, progress }
+      return { kr, progress }
     })
-  }, [goalState, selected])
+  }, [goalState, selectedKrs])
+
+  const weakestKr = useMemo(() => {
+    if (krProgressRows.length === 0) return null
+    return [...krProgressRows].sort((a, b) => a.progress - b.progress)[0]
+  }, [krProgressRows])
+
+  const nextMissionStep = useMemo(() => {
+    const activeMissionStep = selected?.activeMission?.actions.find((item) => !item.done)?.title
+    if (activeMissionStep) return activeMissionStep
+    if (actions[0]?.titleRu) return actions[0].titleRu
+    if (weakestKr) {
+      const metricName = METRICS.find((item) => item.id === weakestKr.kr.metricId)?.labelRu ?? weakestKr.kr.metricId
+      return `Поддержите ветвь «${metricName}» коротким ритуалом сегодня.`
+    }
+    return 'Обновите состояние, чтобы получить следующий шаг.'
+  }, [actions, selected, weakestKr])
 
   const activeMission = selected?.activeMission
   const missionCompleted = Boolean(activeMission?.completedAt)
-  const nextMissionStep = activeMission?.actions.find((item) => !item.done)?.title ?? actions[0]?.titleRu ?? 'Обновите состояние, чтобы получить следующую миссию.'
 
-  const primaryMetricIds = useMemo(() => {
-    if (!editor) return []
-    const sorted = Object.entries(editor.weights)
-      .sort((a, b) => Math.abs((b[1] ?? 0)) - Math.abs((a[1] ?? 0)))
-      .map(([metricId]) => metricId as MetricId)
-    const unique = Array.from(new Set(sorted))
-    const filled = [...unique]
-    for (const metric of METRICS) {
-      if (filled.length >= 6) break
-      if (!filled.includes(metric.id)) filled.push(metric.id)
-    }
-    return filled.slice(0, Math.max(3, Math.min(6, filled.length)))
-  }, [editor])
+  const yggdrasilBranches = useMemo(() => {
+    return krProgressRows.map((row, index) => {
+      const label = METRICS.find((item) => item.id === row.kr.metricId)?.labelRu ?? row.kr.metricId
+      const weight = selected?.weights[row.kr.metricId] ?? 0
+      const runeLevel = Math.max(1, Math.min(5, Math.round(Math.abs(weight) * 5)))
+      const rune = (['I', 'II', 'III', 'IV', 'V'][runeLevel - 1] ?? 'I') as 'I' | 'II' | 'III' | 'IV' | 'V'
+      const strength: BranchStrength = row.progress < 0.34 ? 'weak' : row.progress < 0.67 ? 'normal' : 'strong'
+      return {
+        id: row.kr.id,
+        title: label,
+        direction: row.kr.direction,
+        rune,
+        strength,
+        index,
+      }
+    })
+  }, [krProgressRows, selected])
 
   const editorKeyResults = useMemo(() => {
     if (!editor) return []
-    return editor.okr.keyResults.length > 0
-      ? editor.okr.keyResults
-      : Object.entries(editor.weights).slice(0, 3).map(([metricId, weight], index) => createKrFromMetric(metricId as MetricId, weight ?? 0, index))
-  }, [editor])
+    return ensureGoalKeyResults(editor, goalState)
+  }, [editor, goalState])
 
   const updateEditorKr = (krId: string, patch: Partial<GoalKeyResult>) => {
     if (!editor) return
@@ -321,15 +360,14 @@ export function GoalsPage() {
 
   const acceptMission = async () => {
     if (!selected) return
-    const krs = (selected.okr.keyResults.length > 0 ? selected.okr.keyResults : krProgressRows.map((row) => row.kr)).slice(0, 3)
-    const generatedActions: GoalMissionAction[] = krs.slice(0, 3).map((kr, index) => {
+    const generatedActions: GoalMissionAction[] = selectedKrs.slice(0, 3).map((kr, index) => {
       const recommendation = actions.find((item) => item.metricId === kr.metricId)
       return {
         id: `${kr.id}-a-${index}`,
         metricId: kr.metricId,
         krId: kr.id,
         done: false,
-        title: recommendation?.titleRu ?? `Действие по KR${index + 1}: ${kr.metricId}`,
+        title: recommendation?.titleRu ?? `Ритуал по ветви KR${index + 1}: ${METRICS.find((item) => item.id === kr.metricId)?.labelRu ?? kr.metricId}`,
       }
     })
 
@@ -349,7 +387,7 @@ export function GoalsPage() {
     const actionsUpdated = selected.activeMission.actions.map((item) => item.id === actionId ? { ...item, done } : item)
     const completed = actionsUpdated.every((item) => item.done)
 
-    const updatedKrs = selected.okr.keyResults.map((kr) => {
+    const updatedKrs = selectedKrs.map((kr) => {
       const completedForKr = actionsUpdated.some((item) => item.krId === kr.id && item.done)
       if (!completedForKr) return kr
       const current = typeof kr.progress === 'number' ? kr.progress : 0
@@ -398,9 +436,10 @@ export function GoalsPage() {
           Открыть в Мультивселенной
         </button>
       </div>
-      <div className="oracle-grid goals-layout">
-        <article className="summary-card panel">
-          <h2>Список целей</h2>
+
+      <div className="oracle-grid goals-layout goals-layout--yggdrasil">
+        <article className="summary-card panel goals-forest">
+          <h2>Лес целей</h2>
           <button ref={seedButtonRef} type="button" onClick={startSeed}>Посадить семя</button>
           {goals.length === 0 ? <p>Пока нет целей.</p> : null}
           <ul>
@@ -422,104 +461,31 @@ export function GoalsPage() {
         </article>
 
         <article className="summary-card panel">
-          <h2>Редактор</h2>
-          {editor ? (
-            <>
-              <label>Название<input value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} /></label>
-              <label>Описание<textarea value={editor.description ?? ''} onChange={(e) => setEditor({ ...editor, description: e.target.value })} /></label>
-              <label>
-                Горизонт
-                <select value={editor.horizonDays} onChange={(e) => setEditor({ ...editor, horizonDays: Number(e.target.value) as 7 | 14 | 30 })}>
-                  <option value={7}>7 дней</option><option value={14}>14 дней</option><option value={30}>30 дней</option>
-                </select>
-              </label>
-              <h3>Главные ветви</h3>
-              {METRICS.filter((metric) => primaryMetricIds.includes(metric.id)).map((metric) => (
-                <label key={metric.id}>{metric.labelRu}: {(editor.weights[metric.id] ?? 0).toFixed(2)}
-                  <input type="range" min={-1} max={1} step={0.1} value={editor.weights[metric.id] ?? 0} onChange={(e) => setEditor({ ...editor, weights: { ...editor.weights, [metric.id]: Number(e.target.value) } })} />
-                </label>
-              ))}
-
-              <details className="graph-accordion">
-                <summary>Подробнее (для продвинутых)</summary>
-                {editorKeyResults.map((kr, index) => (
-                <div key={kr.id} className="panel" style={{ marginBottom: 8 }}>
-                  <strong>KR{index + 1}: {METRICS.find((item) => item.id === kr.metricId)?.labelRu ?? kr.metricId}</strong>
-                  <label>
-                    Направление: вверх/вниз
-                    <select
-                      value={kr.direction}
-                      onChange={(e) => updateEditorKr(kr.id, { direction: e.target.value as 'up' | 'down' })}
-                    >
-                      <option value="up">Вверх</option>
-                      <option value="down">Вниз</option>
-                    </select>
-                  </label>
-                  <label>
-                    Цель (опционально)
-                    <input
-                      type="number"
-                      value={kr.target ?? ''}
-                      onChange={(e) => updateEditorKr(kr.id, { target: e.target.value ? Number(e.target.value) : undefined })}
-                    />
-                  </label>
-                  <label>
-                    Режим прогресса: авто/ручной
-                    <select
-                      value={kr.progressMode ?? 'auto'}
-                      onChange={(e) => updateEditorKr(kr.id, { progressMode: e.target.value as 'auto' | 'manual' })}
-                    >
-                      <option value="auto">Авто</option>
-                      <option value="manual">Ручной</option>
-                    </select>
-                  </label>
-                  {(kr.progressMode ?? 'auto') === 'manual' ? (
-                    <label>
-                      Progress (0..1)
-                      <input
-                        type="number"
-                        min={0}
-                        max={1}
-                        step={0.1}
-                        value={kr.progress ?? 0}
-                        onChange={(e) => updateEditorKr(kr.id, { progress: clamp01(Number(e.target.value || 0)) })}
-                      />
-                    </label>
-                  ) : null}
-                </div>
-              ))}
-              </details>
-
-              <div className="settings-actions">
-                <button type="button" onClick={async () => { await updateGoal(editor.id, editor); await reload() }}>Сохранить</button>
-                <button type="button" onClick={async () => { await setActiveGoal(editor.id); await reload() }}>Сделать активной</button>
-                <button type="button" onClick={async () => { await updateGoal(editor.id, { status: 'archived', active: false }); await reload() }}>Архивировать</button>
-              </div>
-            </>
-          ) : <p>Выберите цель.</p>}
+          {selected ? (
+            <GoalYggdrasilTree objective={selected.okr.objective} branches={yggdrasilBranches} />
+          ) : <p>Выберите цель, чтобы увидеть сцену дерева.</p>}
         </article>
 
         <article className="summary-card panel goals-tree-state">
-          <h2>Состояние дерева</h2>
+          <h2>Друид</h2>
           {selected && scoring ? (
             <>
               <p>
-                Статус:{' '}
+                Статус дерева:{' '}
                 <span className={`status-badge ${treeState?.toneClass ?? 'status-badge--mid'}`}>
                   {treeState?.label ?? 'Штормит'}
                 </span>
               </p>
-
+              <p><strong>Слабая ветвь:</strong> {weakestKr ? (METRICS.find((item) => item.id === weakestKr.kr.metricId)?.labelRu ?? weakestKr.kr.metricId) : '—'}</p>
               <div className="goals-tree-state__top-layer panel">
                 <p><strong>Следующий шаг:</strong> {nextMissionStep}</p>
-                <button type="button" onClick={acceptMission} disabled={Boolean(activeMission && !missionCompleted)}>Принять миссию на 3 дня</button>
-                <p className="goals-tree-state__placeholder">Иггдрасиль строится…</p>
+                <button type="button" onClick={acceptMission} disabled={Boolean(activeMission && !missionCompleted)}>Принять миссию</button>
               </div>
 
               <h3>Миссия на 3 дня</h3>
               {activeMission ? (
                 <div className="panel">
-                  <p>Миссия #{activeMission.id.slice(-6)} · 3 дня · {missionCompleted ? 'выполнена' : 'активна'}.</p>
+                  <p>Миссия #{activeMission.id.slice(-6)} · {missionCompleted ? 'выполнена' : 'активна'}.</p>
                   <ul>
                     {activeMission.actions.map((action) => (
                       <li key={action.id}>
@@ -535,18 +501,81 @@ export function GoalsPage() {
               ) : (
                 <p>Миссия ещё не принята.</p>
               )}
-
-              <details className="graph-accordion">
-                <summary>Подробнее (для продвинутых)</summary>
-                <p>Сила роста: <strong>{scoring.goalScore.toFixed(1)}</strong>{historyTrend ? ` (${historyTrend === 'up' ? '↑' : '↓'})` : ''}</p>
-                <p>Насколько далеко: <strong>{scoring.goalGap >= 0 ? '+' : ''}{scoring.goalGap.toFixed(1)}</strong></p>
-                <p>Прогресс цели: <strong>{goalState?.index.toFixed(1)}</strong></p>
-                <p>Риск шторма: <strong>{((goalState?.pCollapse ?? 0) * 100).toFixed(1)}%</strong></p>
-              </details>
             </>
           ) : <p>Нет данных для оценки состояния дерева.</p>}
         </article>
       </div>
+
+      {editor ? (
+        <details className="graph-accordion">
+          <summary>Кузница (для продвинутых)</summary>
+          <article className="summary-card panel">
+            <h3>Настройка цели</h3>
+            <label>Название<input value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} /></label>
+            <label>Objective<input value={editor.okr.objective} onChange={(e) => setEditor({ ...editor, okr: { ...editor.okr, objective: e.target.value } })} /></label>
+            <label>Описание<textarea value={editor.description ?? ''} onChange={(e) => setEditor({ ...editor, description: e.target.value })} /></label>
+            <label>
+              Горизонт
+              <select value={editor.horizonDays} onChange={(e) => setEditor({ ...editor, horizonDays: Number(e.target.value) as 7 | 14 | 30 })}>
+                <option value={7}>7 дней</option><option value={14}>14 дней</option><option value={30}>30 дней</option>
+              </select>
+            </label>
+
+            <h4>Веса метрик</h4>
+            {METRICS.map((metric) => (
+              <label key={metric.id}>{metric.labelRu}: {(editor.weights[metric.id] ?? 0).toFixed(2)}
+                <input type="range" min={-1} max={1} step={0.1} value={editor.weights[metric.id] ?? 0} onChange={(e) => setEditor({ ...editor, weights: { ...editor.weights, [metric.id]: Number(e.target.value) } })} />
+              </label>
+            ))}
+
+            <h4>KR и прогресс</h4>
+            {editorKeyResults.map((kr, index) => (
+              <div key={kr.id} className="panel" style={{ marginBottom: 8 }}>
+                <strong>KR{index + 1}: {METRICS.find((item) => item.id === kr.metricId)?.labelRu ?? kr.metricId}</strong>
+                <label>
+                  Направление
+                  <select value={kr.direction} onChange={(e) => updateEditorKr(kr.id, { direction: e.target.value as 'up' | 'down' })}>
+                    <option value="up">Вверх</option>
+                    <option value="down">Вниз</option>
+                  </select>
+                </label>
+                <label>
+                  Цель (опционально)
+                  <input type="number" value={kr.target ?? ''} onChange={(e) => updateEditorKr(kr.id, { target: e.target.value ? Number(e.target.value) : undefined })} />
+                </label>
+                <label>
+                  Режим прогресса
+                  <select value={kr.progressMode ?? 'auto'} onChange={(e) => updateEditorKr(kr.id, { progressMode: e.target.value as 'auto' | 'manual' })}>
+                    <option value="auto">Авто</option>
+                    <option value="manual">Ручной</option>
+                  </select>
+                </label>
+                {(kr.progressMode ?? 'auto') === 'manual' ? (
+                  <label>
+                    Progress (0..1)
+                    <input type="number" min={0} max={1} step={0.1} value={kr.progress ?? 0} onChange={(e) => updateEditorKr(kr.id, { progress: clamp01(Number(e.target.value || 0)) })} />
+                  </label>
+                ) : null}
+              </div>
+            ))}
+
+            {scoring ? (
+              <div>
+                <p>Сила роста: <strong>{scoring.goalScore.toFixed(1)}</strong>{historyTrend ? ` (${historyTrend === 'up' ? '↑' : '↓'})` : ''}</p>
+                <p>Насколько далеко: <strong>{scoring.goalGap >= 0 ? '+' : ''}{scoring.goalGap.toFixed(1)}</strong></p>
+                <p>Прогресс цели: <strong>{goalState?.index.toFixed(1)}</strong></p>
+                <p>Риск шторма: <strong>{((goalState?.pCollapse ?? 0) * 100).toFixed(1)}%</strong></p>
+              </div>
+            ) : null}
+
+            <div className="settings-actions">
+              <button type="button" onClick={async () => { await updateGoal(editor.id, editor); await reload() }}>Сохранить</button>
+              <button type="button" onClick={async () => { await setActiveGoal(editor.id); await reload() }}>Сделать активной</button>
+              <button type="button" onClick={async () => { await updateGoal(editor.id, { status: 'archived', active: false }); await reload() }}>Архивировать</button>
+            </div>
+          </article>
+        </details>
+      ) : null}
 
       {seedModalOpen ? (
         <div className="goals-modal-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSeedModal() }}>

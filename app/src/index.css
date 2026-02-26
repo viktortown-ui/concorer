@@ -2568,3 +2568,89 @@ button.danger { background: color-mix(in srgb, #e45959 30%, var(--panel) 70%); b
     animation: none;
   }
 }
+
+.goals-layout--yggdrasil {
+  grid-template-columns: 0.9fr 1.3fr 1fr;
+  align-items: start;
+}
+
+.goals-forest ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.goal-yggdrasil {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.goal-yggdrasil h2 {
+  margin: 0;
+}
+
+.goal-yggdrasil__objective,
+.goal-yggdrasil__caption {
+  margin: 0;
+  color: var(--muted);
+}
+
+.goal-yggdrasil__scene {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: radial-gradient(circle at 50% 10%, rgba(95, 125, 188, 0.2), rgba(8, 12, 24, 0.8));
+}
+
+.goal-yggdrasil__scene svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.goal-yggdrasil__trunk {
+  stroke: rgba(205, 162, 103, 0.95);
+  stroke-width: 14;
+  stroke-linecap: round;
+}
+
+.goal-yggdrasil__root {
+  stroke: rgba(148, 125, 90, 0.7);
+  stroke-width: 4;
+  fill: none;
+  stroke-linecap: round;
+}
+
+.goal-yggdrasil__branch {
+  fill: none;
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+
+.goal-yggdrasil__branch--weak { stroke: rgba(235, 127, 127, 0.85); }
+.goal-yggdrasil__branch--normal { stroke: rgba(133, 172, 240, 0.9); }
+.goal-yggdrasil__branch--strong { stroke: rgba(89, 229, 176, 0.9); }
+
+.goal-yggdrasil__leaf--weak { fill: rgba(235, 127, 127, 0.85); }
+.goal-yggdrasil__leaf--normal { fill: rgba(133, 172, 240, 0.9); }
+.goal-yggdrasil__leaf--strong { fill: rgba(89, 229, 176, 0.9); }
+
+.goal-yggdrasil__branches {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.goal-yggdrasil__branches li {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+}
+
+.goal-yggdrasil__branches span {
+  color: var(--muted);
+  font-size: 12px;
+}
