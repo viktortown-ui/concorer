@@ -4,7 +4,7 @@ import { evaluateGoalScore, suggestGoalActions, type GoalStateInput } from './in
 import type { GoalRecord } from '../../models/goal'
 
 const goal: GoalRecord = {
-  id: 1,
+  id: "goal-test",
   createdAt: 1,
   updatedAt: 1,
   title: 'Устойчивый рост',
@@ -19,6 +19,8 @@ const goal: GoalRecord = {
   targetPCollapse: 0.2,
   constraints: { maxEntropy: 6, maxPCollapse: 0.25, sirenCap: 'amber' },
   status: 'active',
+  active: true,
+  okr: { objective: 'Рост без перегруза', keyResults: [] },
 }
 
 const baseState: GoalStateInput = {

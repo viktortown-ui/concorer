@@ -6,7 +6,7 @@ import type { TimeDebtSnapshotRecord } from '../core/models/timeDebt'
 export function TimeDebtPage({ onQuestChange }: { onQuestChange: () => Promise<void> }) {
   const [snapshot, setSnapshot] = useState<TimeDebtSnapshotRecord | null>(null)
   const [history, setHistory] = useState<TimeDebtSnapshotRecord[]>([])
-  const [goalId, setGoalId] = useState<number | undefined>()
+  const [goalId, setGoalId] = useState<string | undefined>()
 
   const load = async () => {
     const [last, rows, goal] = await Promise.all([

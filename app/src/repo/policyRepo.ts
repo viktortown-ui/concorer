@@ -16,7 +16,7 @@ export interface PolicyRunRecord {
   id?: number
   ts: number
   stateRef: { stateSnapshotId?: number; regimeSnapshotId?: number; timeDebtSnapshotId?: number }
-  goalRef?: { id: number; title: string }
+  goalRef?: { id: string; title: string }
   inputs: unknown
   outputs: unknown
   chosenPolicyId?: number
