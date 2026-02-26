@@ -249,61 +249,224 @@ export async function listRegimeSnapshots(limit = 90): Promise<RegimeSnapshotRec
 }
 
 
-export async function createGoal(goal: Omit<GoalRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<GoalRecord> {
-  const now = Date.now()
-  const record: GoalRecord = { ...goal, createdAt: now, updatedAt: now }
-  const id = await db.goals.add(record)
-  return { ...record, id }
+function createGoalId(): string {
+  return `goal-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-export async function updateGoal(id: number, patch: Partial<Omit<GoalRecord, 'id' | 'createdAt'>>): Promise<GoalRecord | undefined> {
+function normalizeGoalRecord(row: unknown): GoalRecord | null {
+  if (!row || typeof row !== 'object') return null
+  const source = row as Partial<GoalRecord> & { id?: string | number; status?: string; active?: boolean; weights?: Record<string, number>; okr?: GoalRecord['okr'] }
+  const now = Date.now()
+  const id = source.id == null ? createGoalId() : String(source.id)
+  const title = (source.title ?? '').trim()
+  if (!title) return null
+  const status: GoalRecord['status'] = source.status === 'archived' ? 'archived' : source.status === 'active' ? 'active' : 'draft'
+  const horizonDays = source.horizonDays === 7 || source.horizonDays === 30 ? source.horizonDays : 14
+  const okr = source.okr && typeof source.okr.objective === 'string' && Array.isArray(source.okr.keyResults)
+    ? {
+      objective: source.okr.objective,
+      keyResults: source.okr.keyResults.map((item) => ({
+        id: String(item.id ?? `kr-${Math.random().toString(36).slice(2, 8)}`),
+        metricId: item.metricId,
+        direction: item.direction === 'down' ? 'down' as const : 'up' as const,
+        target: item.target,
+        note: item.note,
+      })),
+    }
+    : { objective: '', keyResults: [] }
+
+  return {
+    id,
+    createdAt: typeof source.createdAt === 'number' ? source.createdAt : now,
+    updatedAt: typeof source.updatedAt === 'number' ? source.updatedAt : now,
+    title,
+    description: source.description,
+    horizonDays,
+    status,
+    active: Boolean(source.active) || status === 'active',
+    weights: source.weights ?? {},
+    okr,
+    template: source.template,
+    targetIndex: source.targetIndex,
+    targetPCollapse: source.targetPCollapse,
+    constraints: source.constraints,
+  }
+}
+
+async function ensureGoalsMigrated(): Promise<void> {
+  const rows = await db.goals.toArray()
+  const normalized = rows
+    .map((row) => normalizeGoalRecord(row))
+    .filter((row): row is GoalRecord => Boolean(row))
+
+  if (!normalized.length) {
+    await db.settings.delete('active-goal-id')
+    return
+  }
+
+  let activeId = normalized.find((item) => item.active && item.status === 'active')?.id
+  if (!activeId) {
+    const fromSetting = await db.settings.get('active-goal-id')
+    if (typeof fromSetting?.value === 'string' || typeof fromSetting?.value === 'number') {
+      const candidateId = String(fromSetting.value)
+      const candidate = normalized.find((item) => item.id === candidateId && item.status !== 'archived')
+      if (candidate) {
+        candidate.status = 'active'
+        candidate.active = true
+        activeId = candidate.id
+      }
+    }
+  }
+
+  if (!activeId) {
+    const fallback = normalized.find((item) => item.status !== 'archived')
+    if (fallback) {
+      fallback.status = 'active'
+      fallback.active = true
+      activeId = fallback.id
+    }
+  }
+
+  const now = Date.now()
+  const enforced: GoalRecord[] = normalized.map((item) => {
+    const isActive = item.id === activeId && item.status === 'active'
+    return {
+      ...item,
+      active: isActive,
+      status: item.status === 'archived' ? 'archived' : (isActive ? 'active' : 'draft'),
+      updatedAt: item.updatedAt || now,
+    }
+  })
+
+  await db.transaction('rw', db.goals, db.settings, async () => {
+    await db.goals.clear()
+    await db.goals.bulkPut(enforced)
+    if (activeId) {
+      await db.settings.put({ key: 'active-goal-id', value: activeId, updatedAt: now })
+    } else {
+      await db.settings.delete('active-goal-id')
+    }
+  })
+}
+
+export interface CreateGoalInput {
+  title: string
+  description?: string
+  horizonDays?: 7 | 14 | 30
+  status?: GoalRecord['status']
+  weights?: Record<string, number>
+  okr?: GoalRecord['okr']
+  template?: GoalRecord['template']
+  targetIndex?: number
+  targetPCollapse?: number
+  constraints?: GoalRecord['constraints']
+}
+
+export async function createGoal(goal: CreateGoalInput): Promise<GoalRecord> {
+  await ensureGoalsMigrated()
+  const now = Date.now()
+  const id = createGoalId()
+  const hasActive = await getActiveGoal()
+  const record: GoalRecord = {
+    id,
+    title: goal.title,
+    description: goal.description,
+    horizonDays: goal.horizonDays ?? 14,
+    status: goal.status ?? 'draft',
+    active: false,
+    weights: goal.weights ?? {},
+    okr: goal.okr ?? { objective: '', keyResults: [] },
+    template: goal.template,
+    targetIndex: goal.targetIndex,
+    targetPCollapse: goal.targetPCollapse,
+    constraints: goal.constraints,
+    createdAt: now,
+    updatedAt: now,
+  }
+  const normalized = normalizeGoalRecord(record)
+  if (!normalized) {
+    throw new Error('Invalid goal payload')
+  }
+  await db.goals.put(normalized)
+  if (!hasActive && normalized.status !== 'archived') {
+    return (await setActiveGoal(normalized.id)) ?? normalized
+  }
+  return normalized
+}
+
+export async function updateGoal(id: string, patch: Partial<Omit<GoalRecord, 'id' | 'createdAt'>>): Promise<GoalRecord | undefined> {
+  await ensureGoalsMigrated()
   const row = await db.goals.get(id)
-  if (!row) return undefined
-  const updated: GoalRecord = { ...row, ...patch, updatedAt: Date.now(), id }
+  const normalized = normalizeGoalRecord(row)
+  if (!normalized) return undefined
+  const updated: GoalRecord = normalizeGoalRecord({ ...normalized, ...patch, id, updatedAt: Date.now() }) as GoalRecord
   await db.goals.put(updated)
+
+  if (updated.status === 'archived' && updated.active) {
+    const all = await listGoals()
+    const next = all.find((item) => item.id !== id && item.status !== 'archived')
+    if (next) {
+      await setActiveGoal(next.id)
+    } else {
+      await db.settings.delete('active-goal-id')
+    }
+  }
+
   return updated
 }
 
 export async function listGoals(): Promise<GoalRecord[]> {
-  return db.goals.orderBy('updatedAt').reverse().toArray()
+  await ensureGoalsMigrated()
+  const rows = await db.goals.orderBy('updatedAt').reverse().toArray()
+  return rows.map((item) => normalizeGoalRecord(item)).filter((item): item is GoalRecord => Boolean(item))
 }
 
 export async function getActiveGoal(): Promise<GoalRecord | undefined> {
+  await ensureGoalsMigrated()
   const manual = await db.settings.get('active-goal-id')
-  const activeId = typeof manual?.value === 'number' ? manual.value : undefined
-  if (typeof activeId === 'number') {
-    const byId = await db.goals.get(activeId)
-    if (byId && byId.status === 'active') return byId
+  const activeId = typeof manual?.value === 'string' || typeof manual?.value === 'number' ? String(manual.value) : undefined
+  if (activeId) {
+    const byId = normalizeGoalRecord(await db.goals.get(activeId))
+    if (byId?.active && byId.status === 'active') return byId
   }
-  return db.goals.where('status').equals('active').last()
+  const all = await listGoals()
+  return all.find((item) => item.active && item.status === 'active')
 }
 
-export async function setActiveGoal(id: number): Promise<GoalRecord | undefined> {
-  const all = await db.goals.toArray()
-  const now = Date.now()
+export async function setActiveGoal(id: string): Promise<GoalRecord | undefined> {
+  await ensureGoalsMigrated()
+  const all = await listGoals()
   const target = all.find((item) => item.id === id)
-  if (!target) return undefined
+  if (!target || target.status === 'archived') return undefined
+  const now = Date.now()
 
-  await Promise.all(all.map(async (item) => {
-    if (!item.id) return
-    const nextStatus = item.id === id ? 'active' : (item.status === 'active' ? 'paused' : item.status)
-    if (nextStatus === item.status && item.id !== id) return
-    await db.goals.put({ ...item, status: nextStatus, updatedAt: now })
-  }))
+  await db.transaction('rw', db.goals, db.settings, async () => {
+    await Promise.all(all.map(async (item) => {
+      const next: GoalRecord = {
+        ...item,
+        active: item.id === id,
+        status: item.id === id ? 'active' : (item.status === 'archived' ? 'archived' : 'draft'),
+        updatedAt: now,
+      }
+      await db.goals.put(next)
+    }))
+    await db.settings.put({ key: 'active-goal-id', value: id, updatedAt: now })
+  })
 
-  await db.settings.put({ key: 'active-goal-id', value: id, updatedAt: now })
-  const updated = await db.goals.get(id)
-  return updated
+  return normalizeGoalRecord(await db.goals.get(id)) ?? undefined
 }
 
 
 export async function addGoalEvent(event: Omit<GoalEventRecord, 'id' | 'ts'> & { ts?: number }): Promise<GoalEventRecord> {
-  const record: GoalEventRecord = { ...event, ts: event.ts ?? Date.now() }
+  const record: GoalEventRecord = { ...event, goalId: String(event.goalId), ts: event.ts ?? Date.now() }
   const id = await db.goalEvents.add(record)
   return { ...record, id }
 }
 
-export async function listGoalEvents(goalId: number, limit = 30): Promise<GoalEventRecord[]> {
-  const rows = await db.goalEvents.where('goalId').equals(goalId).toArray()
-  return rows.sort((a, b) => b.ts - a.ts).slice(0, limit)
+export async function listGoalEvents(goalId: string, limit = 30): Promise<GoalEventRecord[]> {
+  const rows = await db.goalEvents.toArray()
+  return rows
+    .filter((row) => String(row.goalId) === goalId)
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, limit)
 }

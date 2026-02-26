@@ -1,15 +1,29 @@
 import type { MetricId } from '../metrics'
 
-export type GoalStatus = 'active' | 'paused' | 'archived'
+export type GoalStatus = 'active' | 'draft' | 'archived'
+
+export interface GoalKeyResult {
+  id: string
+  metricId: MetricId
+  direction: 'up' | 'down'
+  target?: number
+  note?: string
+}
 
 export interface GoalRecord {
-  id?: number
+  id: string
   createdAt: number
   updatedAt: number
   title: string
   description?: string
-  horizonDays: 7 | 14 | 30 | 90
-  weights: Partial<Record<MetricId, number>>
+  horizonDays: 7 | 14 | 30
+  active: boolean
+  weights: Record<string, number>
+  okr: {
+    objective: string
+    keyResults: GoalKeyResult[]
+  }
+  template?: 'growth' | 'anti-storm' | 'energy-balance' | 'money'
   targetIndex?: number
   targetPCollapse?: number
   constraints?: {
@@ -23,7 +37,7 @@ export interface GoalRecord {
 export interface GoalEventRecord {
   id?: number
   ts: number
-  goalId: number
+  goalId: string
   goalScore: number
   goalGap: number
 }

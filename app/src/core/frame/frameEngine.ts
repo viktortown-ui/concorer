@@ -35,7 +35,7 @@ export interface FrameSnapshot {
     disarmProtocol: string[]
   }
   goal: {
-    active?: { id?: number; title: string }
+    active?: { id?: string; title: string }
     goalScore: number
     gap: number
     explainTop3: string[]

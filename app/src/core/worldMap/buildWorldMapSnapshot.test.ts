@@ -26,7 +26,7 @@ function buildFrame(): FrameSnapshot {
       next3: [0.5, 0.5],
     },
     goal: {
-      active: { id: 1, title: 'Фокус' },
+      active: { id: 'goal-focus', title: 'Фокус' },
       goalScore: 3.2,
       gap: -4,
       explainTop3: [],

@@ -20,17 +20,17 @@ describe('goals persistence', () => {
       targetIndex: 7,
       targetPCollapse: 0.2,
       constraints: { maxPCollapse: 0.25, sirenCap: 'amber', maxEntropy: 6 },
-      status: 'paused',
+      status: 'draft',
     })
 
     const second = await createGoal({
       title: 'Стабильный сон',
       horizonDays: 7,
       weights: { sleepHours: 0.7, stress: -0.6 },
-      status: 'paused',
+      status: 'draft',
     })
 
-    await setActiveGoal(second.id!)
+    await setActiveGoal(second.id)
     await updateGoal(second.id!, { description: 'Режим сна 7 дней', constraints: { maxPCollapse: 0.22 } })
 
     const active = await getActiveGoal()
@@ -39,7 +39,7 @@ describe('goals persistence', () => {
     expect(active?.id).toBe(second.id)
     expect(active?.status).toBe('active')
     expect(all).toHaveLength(2)
-    expect(all.find((item) => item.id === first.id)?.status).toBe('paused')
+    expect(all.find((item) => item.id === first.id)?.status).toBe('draft')
   })
 
   it('делает roundtrip событий цели в fake-indexeddb', async () => {
@@ -51,10 +51,10 @@ describe('goals persistence', () => {
       status: 'active',
     })
 
-    await addGoalEvent({ goalId: goal.id!, goalScore: 55.1, goalGap: -14.9, ts: 1000 })
-    await addGoalEvent({ goalId: goal.id!, goalScore: 61.2, goalGap: -8.8, ts: 2000 })
+    await addGoalEvent({ goalId: goal.id, goalScore: 55.1, goalGap: -14.9, ts: 1000 })
+    await addGoalEvent({ goalId: goal.id, goalScore: 61.2, goalGap: -8.8, ts: 2000 })
 
-    const rows = await listGoalEvents(goal.id!, 5)
+    const rows = await listGoalEvents(goal.id, 5)
     expect(rows).toHaveLength(2)
     expect(rows[0].goalScore).toBe(61.2)
     expect(rows[1].goalScore).toBe(55.1)

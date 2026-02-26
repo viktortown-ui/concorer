@@ -19,34 +19,57 @@ import {
 import { evaluateGoalScore, suggestGoalActions, type GoalStateInput } from '../core/engines/goal'
 import { getLatestForecastRun } from '../repo/forecastRepo'
 
-const defaultGoal: Omit<GoalRecord, 'id' | 'createdAt' | 'updatedAt'> = {
-  title: 'Удержать устойчивый рост',
-  description: 'Фокус на росте индекса при контроле риска.',
-  horizonDays: 14,
-  weights: { energy: 0.6, stress: -0.8, sleepHours: 0.4, productivity: 0.6 },
-  targetIndex: 7,
-  targetPCollapse: 0.2,
-  constraints: { maxPCollapse: 0.25, sirenCap: 'amber', maxEntropy: 6 },
-  status: 'active',
+type GoalTemplateId = 'growth' | 'anti-storm' | 'energy-balance' | 'money'
+
+const templates: Record<GoalTemplateId, { title: string; description: string; weights: GoalRecord['weights']; objective: string }> = {
+  growth: {
+    title: 'Рост',
+    description: 'Усилить продуктивность при контроле стресса.',
+    objective: 'Расту стабильно без перегрева.',
+    weights: { productivity: 0.7, focus: 0.5, stress: -0.7, energy: 0.5 },
+  },
+  'anti-storm': {
+    title: 'Анти-шторм',
+    description: 'Снизить риски и стабилизировать систему.',
+    objective: 'Удерживаю риски под контролем.',
+    weights: { stress: -0.9, sleepHours: 0.6, health: 0.5 },
+  },
+  'energy-balance': {
+    title: 'Баланс энергии',
+    description: 'Ровный режим энергии и сна.',
+    objective: 'Держу устойчивый ритм.',
+    weights: { energy: 0.8, sleepHours: 0.6, stress: -0.5 },
+  },
+  money: {
+    title: 'Деньги',
+    description: 'Укрепить финансовый контур без потери ресурса.',
+    objective: 'Улучшаю cashflow и контроль решений.',
+    weights: { cashFlow: 0.8, productivity: 0.4, stress: -0.4 },
+  },
 }
 
 export function GoalsPage() {
   const navigate = useNavigate()
   const [goals, setGoals] = useState<GoalRecord[]>([])
-  const [selectedGoalId, setSelectedGoalId] = useState<number | null>(null)
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null)
   const [editor, setEditor] = useState<GoalRecord | null>(null)
   const [goalState, setGoalState] = useState<GoalStateInput | null>(null)
   const [historyTrend, setHistoryTrend] = useState<'up' | 'down' | null>(null)
+  const [actions, setActions] = useState<ReturnType<typeof suggestGoalActions>>([])
+  const [seedModalOpen, setSeedModalOpen] = useState(false)
+  const [seedTemplate, setSeedTemplate] = useState<GoalTemplateId>('growth')
+  const [seedTitle, setSeedTitle] = useState('')
+  const [seedHorizon, setSeedHorizon] = useState<7 | 14 | 30>(14)
+  const [duplicateCandidate, setDuplicateCandidate] = useState<GoalRecord | null>(null)
 
   const reload = async () => {
-    const [allGoals, active, latestState, latestRegime, checkins, latestForecast, matrix] = await Promise.all([
+    const [allGoals, active, latestState, latestRegime, checkins, latestForecast] = await Promise.all([
       listGoals(),
       getActiveGoal(),
       getLatestStateSnapshot(),
       getLatestRegimeSnapshot(),
       listCheckins(),
       getLatestForecastRun(),
-      loadInfluenceMatrix(),
     ])
 
     setGoals(allGoals)
@@ -72,35 +95,26 @@ export function GoalsPage() {
       drift: latestState.drift,
       stats: latestState.stats,
       metrics,
-      forecast: latestForecast ? {
-        p10: latestForecast.index.p10.at(-1),
-        p50: latestForecast.index.p50.at(-1),
-        p90: latestForecast.index.p90.at(-1),
-      } : undefined,
+      forecast: latestForecast
+        ? {
+          p10: latestForecast.index.p10.at(-1),
+          p50: latestForecast.index.p50.at(-1),
+          p90: latestForecast.index.p90.at(-1),
+        }
+        : undefined,
     }
 
     setGoalState(currentState)
 
-    if (active?.id) {
-      const rows = await listGoalEvents(active.id, 2)
-      if (rows.length >= 2) {
-        setHistoryTrend(rows[0].goalScore >= rows[1].goalScore ? 'up' : 'down')
-      } else {
-        setHistoryTrend(null)
-      }
-      if (picked?.id && currentState) {
-        const score = evaluateGoalScore(picked, currentState)
-        const actions = suggestGoalActions(picked, currentState, matrix)
-        if (actions[0]) {
-          await addGoalEvent({ goalId: picked.id, goalScore: score.goalScore, goalGap: score.goalGap })
-        }
-      }
+    if (picked?.id && currentState) {
+      const rows = await listGoalEvents(picked.id, 2)
+      setHistoryTrend(rows.length >= 2 && rows[0].goalScore >= rows[1].goalScore ? 'up' : rows.length >= 2 ? 'down' : null)
     }
   }
 
   useEffect(() => {
     void reload()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const selected = useMemo(() => goals.find((item) => item.id === selectedGoalId) ?? null, [goals, selectedGoalId])
@@ -110,8 +124,6 @@ export function GoalsPage() {
     return evaluateGoalScore(selected, goalState)
   }, [selected, goalState])
 
-  const [actions, setActions] = useState<ReturnType<typeof suggestGoalActions>>([])
-
   useEffect(() => {
     let cancelled = false
     const run = async () => {
@@ -119,41 +131,87 @@ export function GoalsPage() {
       const matrix = await loadInfluenceMatrix()
       if (cancelled) return
       setActions(suggestGoalActions(selected, goalState, matrix))
+      if (scoring) {
+        await addGoalEvent({ goalId: selected.id, goalScore: scoring.goalScore, goalGap: scoring.goalGap })
+      }
     }
     void run()
-    return () => { cancelled = true }
-  }, [selected, goalState])
+    return () => {
+      cancelled = true
+    }
+  }, [selected, goalState, scoring])
 
-  if (!goals.length) {
-    return (
-      <section className="page">
-        <h1>Цели</h1>
-        <article className="empty-state panel">
-          <h2>Цель = автопилот решений</h2>
-          <p>Сформулируйте вектор цели, чтобы системы влияний, режимов и прогнозов работали как единый контур выбора действий.</p>
-          <button type="button" onClick={async () => { await createGoal(defaultGoal); await reload() }}>Создать цель</button>
-        </article>
-      </section>
-    )
+  const startSeed = () => {
+    setSeedModalOpen(true)
+    setSeedTemplate('growth')
+    setSeedTitle('')
+    setSeedHorizon(14)
+    setDuplicateCandidate(null)
+  }
+
+  const submitSeed = async (forceCreate = false) => {
+    const normalizedTitle = seedTitle.trim()
+    if (!normalizedTitle) return
+    const duplicate = goals.find((item) => item.title.trim().toLowerCase() === normalizedTitle.toLowerCase())
+    if (duplicate && !forceCreate) {
+      setDuplicateCandidate(duplicate)
+      return
+    }
+
+    const tpl = templates[seedTemplate]
+    const created = await createGoal({
+      title: normalizedTitle,
+      description: tpl.description,
+      horizonDays: seedHorizon,
+      status: 'draft',
+      template: seedTemplate,
+      weights: tpl.weights,
+      okr: { objective: tpl.objective, keyResults: [] },
+    })
+
+    await setActiveGoal(created.id)
+    setSeedModalOpen(false)
+    setDuplicateCandidate(null)
+    setSelectedGoalId(created.id)
+    await reload()
   }
 
   return (
     <section className="page">
       <h1>Цели</h1>
-      <div className="settings-actions"><button type="button" onClick={() => {
-        const focus = Object.entries(selected?.weights ?? {}).sort((a, b) => Math.abs((b[1] ?? 0)) - Math.abs((a[1] ?? 0))).slice(0, 3)
-        const impulses = Object.fromEntries(focus.map(([metricId, w]) => [metricId, (w ?? 0) > 0 ? 0.5 : -0.5]))
-        window.localStorage.setItem('gamno.multiverseDraft', JSON.stringify({ impulses, focusMetrics: focus.map(([metricId]) => metricId), sourceLabelRu: 'Цель → Мультивселенная' }))
-        navigate('/multiverse')
-      }}>Открыть в Мультивселенной</button></div>
+      <div className="settings-actions">
+        <button
+          type="button"
+          onClick={() => {
+            const focus = Object.entries(selected?.weights ?? {})
+              .sort((a, b) => Math.abs((b[1] ?? 0)) - Math.abs((a[1] ?? 0)))
+              .slice(0, 3)
+            const impulses = Object.fromEntries(focus.map(([metricId, w]) => [metricId, (w ?? 0) > 0 ? 0.5 : -0.5]))
+            window.localStorage.setItem('gamno.multiverseDraft', JSON.stringify({ impulses, focusMetrics: focus.map(([metricId]) => metricId), sourceLabelRu: 'Цель → Мультивселенная' }))
+            navigate('/multiverse')
+          }}
+        >
+          Открыть в Мультивселенной
+        </button>
+      </div>
       <div className="oracle-grid goals-layout">
         <article className="summary-card panel">
           <h2>Список целей</h2>
-          <button type="button" onClick={async () => { const created = await createGoal(defaultGoal); setSelectedGoalId(created.id ?? null); await setActiveGoal(created.id!); await reload() }}>Создать цель</button>
+          <button type="button" onClick={startSeed}>Посадить семя</button>
+          {goals.length === 0 ? <p>Пока нет целей.</p> : null}
           <ul>
             {goals.map((goal) => (
               <li key={goal.id}>
-                <button type="button" className={selectedGoalId === goal.id ? 'filter-button filter-button--active' : 'filter-button'} onClick={() => { setSelectedGoalId(goal.id ?? null); setEditor(goal) }}>{goal.title} {goal.status === 'active' ? '●' : ''}</button>
+                <button
+                  type="button"
+                  className={selectedGoalId === goal.id ? 'filter-button filter-button--active' : 'filter-button'}
+                  onClick={() => {
+                    setSelectedGoalId(goal.id)
+                    setEditor(goal)
+                  }}
+                >
+                  {goal.title} {goal.active ? '· Активна' : ''} {goal.status === 'archived' ? '· Архив' : ''}
+                </button>
               </li>
             ))}
           </ul>
@@ -161,30 +219,29 @@ export function GoalsPage() {
 
         <article className="summary-card panel">
           <h2>Редактор</h2>
-          {editor ? <>
-            <label>Название<input value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} /></label>
-            <label>Описание<textarea value={editor.description ?? ''} onChange={(e) => setEditor({ ...editor, description: e.target.value })} /></label>
-            <label>Горизонт
-              <select value={editor.horizonDays} onChange={(e) => setEditor({ ...editor, horizonDays: Number(e.target.value) as 7 | 14 | 30 | 90 })}>
-                <option value={7}>7 дней</option><option value={14}>14 дней</option><option value={30}>30 дней</option><option value={90}>90 дней</option>
-              </select>
-            </label>
-            <h3>Веса метрик</h3>
-            {METRICS.filter((metric) => metric.id !== 'cashFlow').map((metric) => (
-              <label key={metric.id}>{metric.labelRu}: {(editor.weights[metric.id] ?? 0).toFixed(2)}
-                <input type="range" min={-1} max={1} step={0.1} value={editor.weights[metric.id] ?? 0} onChange={(e) => setEditor({ ...editor, weights: { ...editor.weights, [metric.id]: Number(e.target.value) } })} />
+          {editor ? (
+            <>
+              <label>Название<input value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} /></label>
+              <label>Описание<textarea value={editor.description ?? ''} onChange={(e) => setEditor({ ...editor, description: e.target.value })} /></label>
+              <label>
+                Горизонт
+                <select value={editor.horizonDays} onChange={(e) => setEditor({ ...editor, horizonDays: Number(e.target.value) as 7 | 14 | 30 })}>
+                  <option value={7}>7 дней</option><option value={14}>14 дней</option><option value={30}>30 дней</option>
+                </select>
               </label>
-            ))}
-            <label>Предел P(collapse)<input type="number" step={0.01} value={editor.constraints?.maxPCollapse ?? 0.25} onChange={(e) => setEditor({ ...editor, constraints: { ...editor.constraints, maxPCollapse: Number(e.target.value) } })} /></label>
-            <div className="settings-actions">
-              <button type="button" onClick={async () => {
-                if (!editor.id) return
-                await updateGoal(editor.id, editor)
-                await reload()
-              }}>Сохранить</button>
-              <button type="button" onClick={async () => { if (!editor.id) return; await setActiveGoal(editor.id); await reload() }}>Сделать активной</button>
-            </div>
-          </> : null}
+              <h3>Веса метрик</h3>
+              {METRICS.map((metric) => (
+                <label key={metric.id}>{metric.labelRu}: {(editor.weights[metric.id] ?? 0).toFixed(2)}
+                  <input type="range" min={-1} max={1} step={0.1} value={editor.weights[metric.id] ?? 0} onChange={(e) => setEditor({ ...editor, weights: { ...editor.weights, [metric.id]: Number(e.target.value) } })} />
+                </label>
+              ))}
+              <div className="settings-actions">
+                <button type="button" onClick={async () => { await updateGoal(editor.id, editor); await reload() }}>Сохранить</button>
+                <button type="button" onClick={async () => { await setActiveGoal(editor.id); await reload() }}>Сделать активной</button>
+                <button type="button" onClick={async () => { await updateGoal(editor.id, { status: 'archived', active: false }); await reload() }}>Архивировать</button>
+              </div>
+            </>
+          ) : <p>Выберите цель.</p>}
         </article>
 
         <article className="summary-card panel">
@@ -198,7 +255,7 @@ export function GoalsPage() {
               <h3>3 лучших действия</h3>
               <ol>{actions.map((item) => <li key={`${item.metricId}-${item.impulse}`}><strong>{item.titleRu}</strong> · Δцели {item.deltaGoalScore >= 0 ? '+' : ''}{item.deltaGoalScore.toFixed(1)} · Δиндекса {item.deltaIndex >= 0 ? '+' : ''}{item.deltaIndex.toFixed(2)} · ΔP(collapse) {(item.deltaPCollapse * 100).toFixed(1)} п.п.<br />{item.rationaleRu}</li>)}</ol>
               <button type="button" onClick={async () => {
-                if (!selected.id || actions.length === 0) return
+                if (actions.length === 0) return
                 const best = actions[0]
                 await addQuest({
                   createdAt: Date.now(),
@@ -216,6 +273,36 @@ export function GoalsPage() {
           ) : <p>Нет данных для расчёта гравитации.</p>}
         </article>
       </div>
+
+      {seedModalOpen ? (
+        <div className="panel" role="dialog" aria-modal="true">
+          <h2>Посадить семя</h2>
+          <label>Шаблон
+            <select value={seedTemplate} onChange={(e) => setSeedTemplate(e.target.value as GoalTemplateId)}>
+              {Object.entries(templates).map(([id, item]) => <option key={id} value={id}>{item.title}</option>)}
+            </select>
+          </label>
+          <label>Название<input value={seedTitle} onChange={(e) => setSeedTitle(e.target.value)} /></label>
+          <label>Горизонт
+            <select value={seedHorizon} onChange={(e) => setSeedHorizon(Number(e.target.value) as 7 | 14 | 30)}>
+              <option value={7}>7 дней</option><option value={14}>14 дней</option><option value={30}>30 дней</option>
+            </select>
+          </label>
+          {duplicateCandidate ? (
+            <div>
+              <p>Такая цель уже есть: открыть её?</p>
+              <div className="settings-actions">
+                <button type="button" onClick={() => { setSelectedGoalId(duplicateCandidate.id); setEditor(duplicateCandidate); setSeedModalOpen(false); setDuplicateCandidate(null) }}>Открыть</button>
+                <button type="button" onClick={async () => { await submitSeed(true) }}>Всё равно создать</button>
+              </div>
+            </div>
+          ) : null}
+          <div className="settings-actions">
+            <button type="button" onClick={async () => { await submitSeed() }}>Создать</button>
+            <button type="button" onClick={() => setSeedModalOpen(false)}>Отмена</button>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }
