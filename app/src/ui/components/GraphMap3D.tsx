@@ -112,6 +112,13 @@ function GraphMapFallback({ onOpenMatrix }: { onOpenMatrix: () => void }) {
   </div>
 }
 
+function GraphMapEmptyState({ onOpenMatrix }: { onOpenMatrix: () => void }) {
+  return <div className="graph-3d-fallback panel">
+    <p>Недостаточно валидных данных для отображения карты. Переключитесь в режим «Матрица» или измените источник весов.</p>
+    <button type="button" className="chip" onClick={onOpenMatrix}>Открыть «Матрица»</button>
+  </div>
+}
+
 class GraphMapErrorBoundary extends Component<{ children: ReactNode; onError: () => void }, { hasError: boolean }> {
   constructor(props: { children: ReactNode; onError: () => void }) {
     super(props)
@@ -207,16 +214,19 @@ export function GraphMap3D(props: GraphMap3DProps) {
     [links, nodes],
   )
   const { links: sanitizedLinks, droppedExamples, droppedLinksCount } = sanitizedGraph
+  const validNodeIds = useMemo(() => new Set(nodes.map((node) => node.id)), [nodes])
+  const validLinks = useMemo(() => sanitizedLinks.filter((link) => validNodeIds.has(link.from) && validNodeIds.has(link.to)), [sanitizedLinks, validNodeIds])
+  const shouldRenderEmptyState = nodes.length === 0 || validLinks.length === 0
 
   const isolatedNodeIds = useMemo(() => {
     const connected = new Set<MetricId>()
-    sanitizedLinks.forEach((link) => {
+    validLinks.forEach((link) => {
       connected.add(link.from)
       connected.add(link.to)
     })
     return new Set(nodes.filter((node) => !connected.has(node.id)).map((node) => node.id))
-  }, [nodes, sanitizedLinks])
-  const graphData = useMemo(() => ({ nodes, links: sanitizedLinks }), [nodes, sanitizedLinks])
+  }, [nodes, validLinks])
+  const graphData = useMemo(() => ({ nodes, links: validLinks }), [nodes, validLinks])
 
   useEffect(() => {
     onSanitizeIssues?.(droppedLinksCount)
@@ -226,9 +236,9 @@ export function GraphMap3D(props: GraphMap3DProps) {
 
   useEffect(() => {
     const graph = fgRef.current
-    if (!graph) return
+    if (!graph || shouldRenderEmptyState) return
     const chargeForce = forceManyBody<GraphNode3D>().strength((node) => -58 - node.val * 4)
-    const linkForce = forceLink<GraphNode3D, GraphLink3D>(sanitizedLinks)
+    const linkForce = forceLink<GraphNode3D, GraphLink3D>(validLinks)
       .id((node) => node.id)
       .distance((link) => 52 + (1 - Math.min(1, Math.abs(link.weight))) * 34)
       .strength((link) => 0.35 + Math.abs(link.weight) * 0.25)
@@ -267,7 +277,7 @@ export function GraphMap3D(props: GraphMap3DProps) {
       }
     })
     graph.d3Force('isolate-anchor', isolateAnchorForce)
-  }, [isolatedNodeIds, nodes, sanitizedLinks])
+  }, [isolatedNodeIds, nodes, shouldRenderEmptyState, validLinks])
 
   useEffect(() => {
     shouldFitOnEngineStop.current = true
@@ -315,12 +325,12 @@ export function GraphMap3D(props: GraphMap3DProps) {
     const target = selectedNodeId ?? hoveredNodeIdLocal
     if (!target) return new Set<MetricId>()
     const peers = new Set<MetricId>([target])
-    sanitizedLinks.forEach((link) => {
+    validLinks.forEach((link) => {
       if (link.from === target) peers.add(link.to)
       if (link.to === target) peers.add(link.from)
     })
     return peers
-  }, [hoveredNodeIdLocal, sanitizedLinks, selectedNodeId])
+  }, [hoveredNodeIdLocal, validLinks, selectedNodeId])
 
   useEffect(() => {
     const controls = fgRef.current?.controls() as OrbitControlsLike | undefined
@@ -396,6 +406,7 @@ export function GraphMap3D(props: GraphMap3DProps) {
   }, [])
 
   if (!webglReady || webglFailed) return <GraphMapFallback onOpenMatrix={onOpenMatrix} />
+  if (shouldRenderEmptyState) return <GraphMapEmptyState onOpenMatrix={onOpenMatrix} />
 
   return <div
     ref={wrapRef}

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Component, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { METRICS, type MetricId } from '../core/metrics'
 import { applyImpulse, defaultInfluenceMatrix, type InfluenceEdge } from '../core/engines/influence/influence'
 import { getTopEdges } from '../core/engines/influence/graphView'
@@ -42,8 +42,55 @@ function stabilityLabel(score: number): string {
   return 'низкая'
 }
 
+type GraphStageBoundaryProps = {
+  children: ReactNode
+  resetKey: string
+  onClose: () => void
+}
+
+type GraphStageBoundaryState = {
+  hasError: boolean
+}
+
+class GraphStageBoundary extends Component<GraphStageBoundaryProps, GraphStageBoundaryState> {
+  constructor(props: GraphStageBoundaryProps) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(): GraphStageBoundaryState {
+    return { hasError: true }
+  }
+
+  componentDidUpdate(prevProps: GraphStageBoundaryProps): void {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false })
+    }
+  }
+
+  private resetBoundary = () => {
+    this.setState({ hasError: false })
+    this.props.onClose()
+  }
+
+  render(): ReactNode {
+    if (this.state.hasError) {
+      return <article className="panel empty-state" role="alert">
+        <h2>Граф временно недоступен</h2>
+        <p>Можно закрыть ошибку без перезагрузки страницы и вернуться к рычагам.</p>
+        <div className="settings-actions">
+          <button type="button" className="chip" onClick={this.resetBoundary}>Закрыть</button>
+          <button type="button" className="chip" onClick={this.resetBoundary}>Повторить</button>
+        </div>
+      </article>
+    }
+    return this.props.children
+  }
+}
+
 export function GraphPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const impulseBlockRef = useRef<HTMLDivElement | null>(null)
   const inspectorToggleRef = useRef<HTMLButtonElement | null>(null)
   const inspectorPanelRef = useRef<HTMLElement | null>(null)
@@ -247,6 +294,7 @@ export function GraphPage() {
   const isInspectorOverlay = !inspectorIsCollapsed && (isNarrowLayout || inspectorMode === 'overlay')
   const isInspectorPinned = !inspectorIsCollapsed && !isNarrowLayout && inspectorMode === 'pinned'
   const mobileSheetOpen = isNarrowLayout && mode !== 'levers' && !inspectorIsCollapsed && mobileInspectorSnap !== 'hidden'
+  const graphStageResetKey = `${location.pathname}|${location.search}|${location.hash}`
 
   useEffect(() => {
     if (!mobileSheetOpen && !isInspectorOverlay) return
@@ -450,7 +498,18 @@ export function GraphPage() {
       />
     </div>}
 
-    {mode !== 'levers' && <div className={`graph-layout ${isInspectorPinned ? 'graph-layout--pinned' : 'graph-layout--stage-only'} ${isInspectorOverlay ? 'graph-layout--overlay' : ''} ${isNarrowLayout ? 'graph-layout--narrow' : ''}`}><div className="graph-stage">
+    {mode !== 'levers' && <GraphStageBoundary
+      resetKey={graphStageResetKey}
+      onClose={() => {
+        setMode('levers')
+        setSelectedNodeId(null)
+        setSelectedEdge(null)
+        setHoveredNodeId(null)
+        setHoveredEdge(null)
+        setHoverPoint(null)
+        setFocusRequest(null)
+      }}
+    ><div className={`graph-layout ${isInspectorPinned ? 'graph-layout--pinned' : 'graph-layout--stage-only'} ${isInspectorOverlay ? 'graph-layout--overlay' : ''} ${isNarrowLayout ? 'graph-layout--narrow' : ''}`}><div className="graph-stage">
       <div className="graph-stage__overlay-tools panel">
         <button ref={inspectorToggleRef} type="button" className="chip" onClick={toggleInspector}>
           {isNarrowLayout ? 'Показать инспектор' : inspectorIsCollapsed ? 'Показать инспектор' : 'Скрыть инспектор'}
@@ -553,7 +612,7 @@ export function GraphPage() {
         <p>Смысл: {edgeMeaning({ from: selectedEdge.from, to: selectedEdge.to, weight: selectedWeight, absWeight: Math.abs(selectedWeight) })}</p>
       </> : null}
       {!selectedNodeId && !selectedEdge && hoveredEdge ? <p>Наведено: {METRICS.find((m) => m.id === hoveredEdge.from)?.labelRu} → {METRICS.find((m) => m.id === hoveredEdge.to)?.labelRu}</p> : null}
-    </aside>}</div>}
+    </aside>}</div></GraphStageBoundary>}
     {helpOpen && <div className="graph-help-sheet" role="dialog" aria-modal="true" aria-label="Справка: граф влияний">
       <div className="graph-help-sheet__backdrop" onClick={() => setHelpOpen(false)} />
       <aside className="graph-help-sheet__panel panel">
