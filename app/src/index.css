@@ -24,7 +24,11 @@
   --rail-meta-size: 12px;
   --rail-safe-glow: 0 0 0 1px rgba(80, 189, 255, 0.45), 0 0 28px rgba(80, 189, 255, 0.18);
   --rail-risk-glow: 0 0 0 1px rgba(183, 122, 255, 0.4), 0 0 26px rgba(245, 185, 84, 0.14);
+  --page-gutter: 16px;
+  --rail-width-expanded: 286px;
+  --rail-width-collapsed: 96px;
 }
+
 
 :root[data-theme='light'] {
   --bg: #dfe8fb;
@@ -48,7 +52,7 @@
 html, body, #root { min-height: 100vh; }
 body {
   margin: 0;
-  min-width: 1200px;
+  min-width: 0;
   color: var(--text);
   background: var(--bg-overlay), var(--bg);
   font-family: var(--font-sans);
@@ -80,8 +84,15 @@ code,
   font-variant-numeric: tabular-nums;
 }
 
-.layout { position: relative; display: grid; grid-template-columns: 286px 1fr; min-height: 100vh; overflow: hidden; transition: grid-template-columns 220ms ease; }
-.layout--sidebar-collapsed { grid-template-columns: 96px 1fr; }
+.layout {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--rail-width-expanded) minmax(0, 1fr);
+  height: 100vh;
+  overflow: hidden;
+  transition: grid-template-columns 220ms ease;
+}
+.layout--sidebar-collapsed { grid-template-columns: var(--rail-width-collapsed) minmax(0, 1fr); }
 .sidebar, .page, .panel, .palette, .inspector {
   background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, #ffffff 6%), var(--panel));
   border: 1px solid var(--panel-border);
@@ -100,11 +111,12 @@ code,
 }
 
 .sidebar {
-  margin: var(--space-4);
+  margin: var(--page-gutter);
+  margin-right: 0;
   padding: var(--space-2);
-  height: calc(100vh - 2 * var(--space-4));
+  height: calc(100vh - 2 * var(--page-gutter));
   position: sticky;
-  top: var(--space-4);
+  top: var(--page-gutter);
   overflow: visible;
   border-radius: 16px;
 }
@@ -301,7 +313,7 @@ code,
   font-size: 12px;
 }
 
-.content { padding: var(--space-3); overflow: auto; }
+.content { min-width: 0; height: 100vh; overflow: auto; padding: var(--page-gutter); padding-left: var(--space-3); }
 .content:has(.start-page) { overflow: hidden; }
 .page { padding: var(--space-4); text-align: left; display: grid; gap: var(--space-3); }
 .page h1 { font-size: 24px; }
@@ -2207,6 +2219,30 @@ input:focus-visible {
   100% { opacity: 0.2; }
 }
 
+
+
+@media (min-width: 1280px) {
+  :root {
+    --page-gutter: 24px;
+  }
+}
+
+@media (max-width: 959px) {
+  .layout {
+    grid-template-columns: var(--rail-width-collapsed) minmax(0, 1fr);
+  }
+
+  .sidebar {
+    margin: var(--space-2);
+    margin-right: 0;
+    top: var(--space-2);
+    height: calc(100vh - 2 * var(--space-2));
+  }
+
+  .content {
+    padding: var(--space-3);
+  }
+}
 
 .layout--hints [data-help-target] {
   outline: 2px solid rgba(93, 231, 255, 0.92);

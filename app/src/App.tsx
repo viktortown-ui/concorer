@@ -79,17 +79,6 @@ const secondaryNavGroups: SecondaryNavGroup[] = [
   },
 ]
 
-function DesktopOnlyGate() {
-  const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 1200)
-  useEffect(() => {
-    const handleResize = () => setIsDesktop(window.innerWidth >= 1200)
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
-  if (isDesktop) return <DesktopApp />
-  return <main className="gate"><h1>Только десктоп</h1><p>Откройте приложение на экране шириной не меньше 1200px.</p></main>
-}
-
 function DesktopApp() {
   const location = useLocation()
   const [checkins, setCheckins] = useState<CheckinRecord[]>([])
@@ -144,6 +133,17 @@ function DesktopApp() {
       await loadData()
     })
     return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    const syncRailMode = () => {
+      setIsRailCollapsed(window.innerWidth < 960)
+      setIsMoreOpen(false)
+      setMoreSearch('')
+    }
+    syncRailMode()
+    window.addEventListener('resize', syncRailMode)
+    return () => window.removeEventListener('resize', syncRailMode)
   }, [])
 
   useEffect(() => {
@@ -314,5 +314,5 @@ function DesktopApp() {
 }
 
 export default function App() {
-  return <DesktopOnlyGate />
+  return <DesktopApp />
 }
