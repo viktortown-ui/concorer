@@ -140,7 +140,7 @@ export function GoalYggdrasilTree({ objective, branches, selectedBranchId, onSel
       </div>
       <ul className="goal-yggdrasil__branches">
         {sceneBranches.map((branch, index) => (
-          <li key={branch.id} className={`panel ${selectedBranchId === branch.id ? 'goal-yggdrasil__branch-card--selected' : ''}`}>
+          <li key={branch.id} className={selectedBranchId === branch.id ? 'goal-yggdrasil__branch-card--selected' : ''}>
             <strong>KR{index + 1}: {branch.title}</strong>
             <span>{branch.direction === 'up' ? '↑ Рост' : '↓ Снижение'} · Руна {branch.rune} · {strengthLabel[branch.strength]}</span>
           </li>

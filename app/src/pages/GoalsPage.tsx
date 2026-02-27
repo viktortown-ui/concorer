@@ -594,14 +594,14 @@ export function GoalsPage() {
               </div>
               <p><strong>Слабая ветвь:</strong> {weakestKr ? (METRICS.find((item) => item.id === weakestKr.kr.metricId)?.labelRu ?? weakestKr.kr.metricId) : '—'}</p>
               <p><strong>Выбранная ветвь:</strong> {selectedKrMetricLabel ?? '—'}</p>
-              <div className="goals-tree-state__top-layer panel">
+              <div className="goals-tree-state__top-layer">
                 <p><strong>Следующий шаг:</strong> {nextMissionStep}</p>
                 <button type="button" onClick={acceptMission} disabled={Boolean(activeMission && !missionCompleted)}>Принять миссию</button>
               </div>
 
               <h3>Миссия на 3 дня</h3>
               {activeMission ? (
-                <div className="panel goals-druid-mission">
+                <div className="goals-druid-mission">
                   <p>Миссия {missionCompleted ? 'выполнена' : 'активна'}.</p>
                   <ul>
                     {activeMission.actions
