@@ -2950,6 +2950,64 @@ button.danger { background: color-mix(in srgb, #e45959 30%, var(--panel) 70%); b
   gap: 8px;
 }
 
+
+.goals-forest__goal-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.goals-forest__goal-row > .filter-button {
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.goals-forest__goal-row--selected > .filter-button {
+  border-color: rgba(143, 107, 255, 0.65);
+}
+
+.goals-forest__badges,
+.goals-forest__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.goals-forest__meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.goals-forest__menu-wrap {
+  position: relative;
+}
+
+.goals-forest__menu-wrap > .filter-button {
+  min-width: 36px;
+  padding-inline: 10px;
+}
+
+.goals-forest__menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 6;
+  min-width: 220px;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.goals-forest__menu button {
+  text-align: left;
+  justify-content: flex-start;
+}
 .goal-yggdrasil {
   min-height: 0;
   display: grid;
@@ -3900,4 +3958,16 @@ button.danger { background: color-mix(in srgb, #e45959 30%, var(--panel) 70%); b
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+
+@media (max-width: 900px) {
+  .goals-forest__goal-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .goals-forest__badges,
+  .goals-forest__meta {
+    grid-column: 1 / -1;
+  }
 }
