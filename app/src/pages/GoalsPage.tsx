@@ -324,10 +324,15 @@ export function GoalsPage() {
     }
   }, [forgeRunes])
 
+  const patchGoalInState = (goalId: string, patch: Partial<GoalRecord>) => {
+    setGoals((current) => current.map((goal) => (goal.id === goalId ? { ...goal, ...patch } : goal)))
+    setEditor((current) => (current?.id === goalId ? { ...current, ...patch } : current))
+  }
+
   const applyModePreset = async (presetId: GoalModePresetId) => {
     if (!selected) return
     const preset = modePresetsMap[presetId]
-    await updateGoal(selected.id, {
+    const goalPatch: Partial<GoalRecord> = {
       modePresetId: presetId,
       isManualTuning: false,
       weights: preset.weights,
@@ -337,27 +342,39 @@ export function GoalsPage() {
         keyResults: buildPresetKrs(presetId),
       },
       activeMission: undefined,
-    })
-    await reload()
+    }
+    patchGoalInState(selected.id, goalPatch)
+    await updateGoal(selected.id, goalPatch)
   }
 
   const toggleManualTuning = async () => {
     if (!selected) return
     if (selected.isManualTuning) {
       const fallbackPresetId = selected.modePresetId ?? 'balance'
-      await updateGoal(selected.id, { isManualTuning: false, modePresetId: fallbackPresetId })
-    } else {
-      await updateGoal(selected.id, {
-        isManualTuning: true,
-        modePresetId: undefined,
-        manualTuning: {
-          weights: selected.manualTuning?.weights ?? selected.weights,
-          horizonDays: selected.manualTuning?.horizonDays ?? selected.horizonDays,
-          krDirections: selected.manualTuning?.krDirections,
-        },
-      })
+      const preset = modePresetsMap[fallbackPresetId]
+      const goalPatch: Partial<GoalRecord> = {
+        isManualTuning: false,
+        modePresetId: fallbackPresetId,
+        weights: preset.weights,
+      }
+      patchGoalInState(selected.id, goalPatch)
+      await updateGoal(selected.id, goalPatch)
+      return
     }
-    await reload()
+
+    const manualWeights = selected.manualTuning?.weights ?? selected.weights
+    const goalPatch: Partial<GoalRecord> = {
+      isManualTuning: true,
+      modePresetId: undefined,
+      weights: manualWeights,
+      manualTuning: {
+        weights: manualWeights,
+        horizonDays: selected.manualTuning?.horizonDays ?? selected.horizonDays,
+        krDirections: selected.manualTuning?.krDirections,
+      },
+    }
+    patchGoalInState(selected.id, goalPatch)
+    await updateGoal(selected.id, goalPatch)
   }
 
   const applyRuneLevel = async (metricId: MetricId, level: number) => {
@@ -367,7 +384,7 @@ export function GoalsPage() {
     const nextWeight = runeLevelToWeight(level, sign)
     const nextWeights = { ...selectedWeights, [metricId]: nextWeight }
 
-    await updateGoal(selected.id, {
+    const goalPatch: Partial<GoalRecord> = {
       isManualTuning: true,
       modePresetId: undefined,
       weights: nextWeights,
@@ -376,8 +393,15 @@ export function GoalsPage() {
         horizonDays: selected.manualTuning?.horizonDays ?? selected.horizonDays,
         krDirections: selected.manualTuning?.krDirections,
       },
-    })
-    await reload()
+    }
+    patchGoalInState(selected.id, goalPatch)
+    await updateGoal(selected.id, goalPatch)
+  }
+
+  const resetManualToPreset = async () => {
+    if (!selected) return
+    const fallbackPresetId = selected.modePresetId ?? 'balance'
+    await applyModePreset(fallbackPresetId)
   }
 
   const scoring = useMemo(() => {
@@ -802,11 +826,6 @@ export function GoalsPage() {
           >
             Открыть в Мультивселенной
           </button>
-          {editor ? (
-            <button ref={forgeOpenButtonRef} type="button" onClick={() => setIsForgeOpen(true)}>
-              Кузница / Настроить режим
-            </button>
-          ) : null}
         </div>
       </div>
 
@@ -879,12 +898,20 @@ export function GoalsPage() {
           <h2>Друид</h2>
           {selected ? (
             <>
-              <p>
-                Статус дерева:{' '}
-                <span className={`status-badge ${treeState?.toneClass ?? 'status-badge--mid'}`}>
-                  {treeState?.label ?? 'N/A'}
-                </span>
-              </p>
+              <div className="goals-druid-headline">
+                <p>
+                  Статус дерева:{' '}
+                  <span className={`status-badge ${treeState?.toneClass ?? 'status-badge--mid'}`}>
+                    {treeState?.label ?? 'N/A'}
+                  </span>
+                </p>
+                <div className="goals-druid-mode-row">
+                  <button ref={forgeOpenButtonRef} type="button" onClick={() => setIsForgeOpen(true)}>
+                    Кузница / Настроить режим
+                  </button>
+                  <span className="chip">Режим: {selected.isManualTuning ? 'Ручной' : selectedPreset.title}</span>
+                </div>
+              </div>
               <div className="goals-druid-gauges" aria-label="Приборка состояния дерева">
                 <DruidGauge label="Здоровье" value01={trunkHealth.value01} stateLabel={trunkHealth.label} stateKind={trunkHealth.stateKind} />
                 <DruidGauge label="Шторм" value01={stormStatus.value01} stateLabel={stormStatus.label} stateKind={stormStatus.stateKind} />
@@ -934,6 +961,7 @@ export function GoalsPage() {
               <p><strong>Друид ждёт выбранную цель.</strong></p>
               <p>Выберите цель в Лесу или посадите семя, чтобы получить миссию на 3 дня.</p>
               <button type="button" onClick={startSeed}>Посадить семя</button>
+              <button type="button" disabled title="Создайте цель, чтобы настраивать режим">Кузница / Настроить режим</button>
             </div>
           )}
         </article>
@@ -953,7 +981,7 @@ export function GoalsPage() {
           <section className="forge-sheet__section">
             <h3>Режим</h3>
             <PresetSelector
-              presets={modePresets.map((preset) => ({ id: preset.id, title: preset.title, summary: preset.summary }))}
+              presets={modePresets.map((preset) => ({ id: preset.id, title: preset.title }))}
               activePresetId={(selected?.modePresetId ?? 'balance') as GoalModePresetId}
               onSelect={(presetId) => { void applyModePreset(presetId) }}
             />
@@ -962,10 +990,17 @@ export function GoalsPage() {
           <section className="forge-sheet__section">
             <div className="forge-sheet__section-head">
               <h3>Руны</h3>
-              <label className="goals-debug-toggle">
-                <input type="checkbox" checked={selected?.isManualTuning ?? false} onChange={() => { void toggleManualTuning() }} />
-                Ручной режим
-              </label>
+              <div className="forge-sheet__actions-row">
+                <label className="goals-debug-toggle">
+                  <input type="checkbox" checked={selected?.isManualTuning ?? false} onChange={() => { void toggleManualTuning() }} />
+                  Ручной режим
+                </label>
+                {selected?.isManualTuning ? (
+                  <button type="button" className="ghost-button" onClick={() => { void resetManualToPreset() }}>
+                    Сбросить к пресету
+                  </button>
+                ) : null}
+              </div>
             </div>
             <div className="forge-runes-grid">
               {forgeRunes.map((rune) => (

@@ -3,7 +3,6 @@ import type { GoalModePresetId } from '../../../core/models/goal'
 interface PresetCard {
   id: GoalModePresetId
   title: string
-  summary: string
 }
 
 interface PresetSelectorProps {
@@ -21,11 +20,11 @@ export function PresetSelector({ presets, activePresetId, onSelect }: PresetSele
           type="button"
           role="tab"
           aria-selected={activePresetId === preset.id}
+          aria-label={`Режим ${preset.title}`}
           className={activePresetId === preset.id ? 'forge-preset forge-preset--active' : 'forge-preset'}
           onClick={() => onSelect(preset.id)}
         >
-          <strong>{preset.title}</strong>
-          <span>{preset.summary}</span>
+          {preset.title}
         </button>
       ))}
     </div>
