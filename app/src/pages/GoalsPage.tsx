@@ -123,6 +123,12 @@ const forestTabLabels: Record<ForestTab, string> = {
   trashed: 'Корзина',
 }
 
+const goalStatusBadgeLabel: Record<GoalRecord['status'], string> = {
+  active: 'Active',
+  archived: 'Archive',
+  trashed: 'Trash',
+}
+
 const linkTypeLabels: Record<GoalLinkType, string> = {
   supports: 'Помогает',
   depends_on: 'Зависит от',
@@ -222,6 +228,11 @@ export function GoalsPage() {
   const [forestSearch, setForestSearch] = useState('')
   const [forestSort, setForestSort] = useState<ForestSort>('recent')
   const [forestViewMode, setForestViewMode] = useState<'forest' | 'roots'>('forest')
+  const [forestMenuGoalId, setForestMenuGoalId] = useState<string | null>(null)
+  useEffect(() => {
+    setForestMenuGoalId(null)
+  }, [forestTab, forestViewMode, goals])
+
   const [linkModalOpen, setLinkModalOpen] = useState(false)
   const [linkSearch, setLinkSearch] = useState('')
   const [linkTargetId, setLinkTargetId] = useState('')
@@ -1164,25 +1175,49 @@ export function GoalsPage() {
                           const progress = goalProgressMap.get(goal.id)
                           return (
                             <li key={goal.id}>
-                              <button
-                                type="button"
-                                className={selectedGoalId === goal.id ? 'filter-button filter-button--active' : 'filter-button'}
-                                onClick={() => {
-                                  setSelectedGoalId(goal.id)
-                                  setEditor(goal)
-                                }}
-                              >
-                                {goal.title} {goal.active ? '· Активна' : ''} {goal.parentGoalId ? '· Дочерняя' : ''} {children.length ? `· Супер-цель (${children.length})` : ''} {typeof progress === 'number' ? `· ${Math.round(progress)}%` : ''}
-                              </button>
-                              <div className="settings-actions">
-                                <button type="button" onClick={async () => { await setActiveGoal(goal.id); await reload() }} disabled={goal.status !== 'active'}>Сделать активной</button>
-                                <button type="button" onClick={async () => { await renameGoal(goal) }}>Переименовать</button>
-                                <button type="button" onClick={async () => { await assignGrove(goal) }}>Назначить рощу</button>
-                                <button type="button" onClick={async () => { await moveToSuperGoal(goal) }}>{goal.parentGoalId ? 'Убрать из супер-цели' : 'В супер-цель'}</button>
-                                {goal.status === 'active' ? <button type="button" onClick={async () => { await archiveGoal(goal) }}>Архивировать</button> : null}
-                                {goal.status !== 'trashed' ? <button type="button" onClick={async () => { await trashGoal(goal) }}>В корзину</button> : null}
-                                {goal.status !== 'active' ? <button type="button" onClick={async () => { await restoreGoal(goal) }}>Восстановить</button> : null}
-                                {goal.status === 'trashed' ? <button type="button" onClick={async () => { await deleteForever(goal) }}>Удалить навсегда</button> : null}
+                              <div className={selectedGoalId === goal.id ? 'goals-forest__goal-row goals-forest__goal-row--selected' : 'goals-forest__goal-row'}>
+                                <button
+                                  type="button"
+                                  className={selectedGoalId === goal.id ? 'filter-button filter-button--active' : 'filter-button'}
+                                  onClick={() => {
+                                    setSelectedGoalId(goal.id)
+                                    setEditor(goal)
+                                  }}
+                                >
+                                  {goal.title}
+                                </button>
+                                <div className="goals-forest__badges" aria-label="Метки цели">
+                                  <span className="chip">{goalStatusBadgeLabel[goal.status]}</span>
+                                  <span className="chip">Роща: {goal.groveId?.trim() || 'Без рощи'}</span>
+                                  {goal.modePresetId ? <span className="chip">Режим: {modePresetsMap[goal.modePresetId].title}</span> : null}
+                                </div>
+                                <div className="goals-forest__meta" aria-label="Дополнительно">
+                                  {goal.parentGoalId ? <span>Дочерняя цель</span> : null}
+                                  {children.length ? <span>Супер-цель: {children.length}</span> : null}
+                                  {typeof progress === 'number' ? <span>{Math.round(progress)}%</span> : null}
+                                </div>
+                                <div className="goals-forest__menu-wrap">
+                                  <button
+                                    type="button"
+                                    className="filter-button"
+                                    aria-label={`Открыть меню: ${goal.title}`}
+                                    onClick={() => setForestMenuGoalId((prev) => prev === goal.id ? null : goal.id)}
+                                  >
+                                    ⋯
+                                  </button>
+                                  {forestMenuGoalId === goal.id ? (
+                                    <div className="goals-forest__menu" role="menu" aria-label={`Действия для цели ${goal.title}`}>
+                                      <button type="button" role="menuitem" onClick={async () => { await setActiveGoal(goal.id); await reload(); setForestMenuGoalId(null) }} disabled={goal.status !== 'active'}>Сделать активной</button>
+                                      <button type="button" role="menuitem" onClick={async () => { await renameGoal(goal); setForestMenuGoalId(null) }}>Переименовать</button>
+                                      <button type="button" role="menuitem" onClick={async () => { await assignGrove(goal); setForestMenuGoalId(null) }}>Назначить рощу</button>
+                                      <button type="button" role="menuitem" onClick={async () => { await moveToSuperGoal(goal); setForestMenuGoalId(null) }}>{goal.parentGoalId ? 'Убрать из супер-цели' : 'В супер-цель'}</button>
+                                      {goal.status === 'active' ? <button type="button" role="menuitem" onClick={async () => { await archiveGoal(goal); setForestMenuGoalId(null) }}>Архивировать</button> : null}
+                                      {goal.status !== 'trashed' ? <button type="button" role="menuitem" onClick={async () => { await trashGoal(goal); setForestMenuGoalId(null) }}>В корзину</button> : null}
+                                      {goal.status !== 'active' ? <button type="button" role="menuitem" onClick={async () => { await restoreGoal(goal); setForestMenuGoalId(null) }}>Восстановить</button> : null}
+                                      {goal.status === 'trashed' ? <button type="button" role="menuitem" onClick={async () => { await deleteForever(goal); setForestMenuGoalId(null) }}>Удалить навсегда</button> : null}
+                                    </div>
+                                  ) : null}
+                                </div>
                               </div>
                             </li>
                           )
