@@ -2,7 +2,7 @@ import { exportDB, importDB } from 'dexie-export-import'
 import type { CheckinRecord, CheckinValues } from '../models/checkin'
 import { METRICS, type MetricId } from '../metrics'
 import { trainLearnedInfluenceMatrix, type LearnedMatrix } from '../engines/influence/learnedInfluenceEngine'
-import { db } from './db'
+import { db, openDbWithRecovery } from './db'
 import type { QuestRecord } from '../models/quest'
 import { defaultInfluenceMatrix } from '../engines/influence/influence'
 import { hashMetricSet, learnedMatrixKey } from './learnedMatrix'
@@ -47,7 +47,7 @@ export async function listCheckins(days?: number): Promise<CheckinRecord[]> {
 
 export async function clearAllData(): Promise<void> {
   await db.delete()
-  await db.open()
+  await openDbWithRecovery()
 }
 
 export async function exportDataBlob(): Promise<Blob> {
@@ -57,7 +57,7 @@ export async function exportDataBlob(): Promise<Blob> {
 export async function importDataBlob(file: Blob): Promise<void> {
   await db.delete()
   await importDB(file)
-  await db.open()
+  await openDbWithRecovery()
 }
 
 function seeded(seed = 42): () => number {
