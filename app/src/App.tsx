@@ -37,6 +37,7 @@ import { StartPage } from './pages/StartPage'
 import { SystemPage } from './pages/SystemPage'
 import { WorldPage } from './pages/WorldPage'
 import { computeAndSaveFrame, getLastFrame, type FrameSnapshotRecord } from './repo/frameRepo'
+import { getLastDbOpenFailure, resetStorageAndReload } from './core/storage/db'
 
 type PageKey = 'start' | 'world' | 'core' | 'dashboard' | 'oracle' | 'autopilot' | 'antifragility' | 'multiverse' | 'time-debt' | 'social-radar' | 'black-swans' | 'goals' | 'graph' | 'history' | 'settings' | 'system'
 
@@ -90,6 +91,7 @@ function DesktopApp() {
   const [hintsEnabled, setHintsEnabled] = useState(false)
   const [isRailCollapsed, setIsRailCollapsed] = useState(false)
   const [isMoreOpen, setIsMoreOpen] = useState(false)
+  const [fatalDbError, setFatalDbError] = useState<{ message: string; report: string } | null>(null)
   const [moreSearch, setMoreSearch] = useState('')
   const [moreReferenceEl, setMoreReferenceEl] = useState<HTMLButtonElement | null>(null)
   const [moreFloatingEl, setMoreFloatingEl] = useState<HTMLDivElement | null>(null)
@@ -114,15 +116,29 @@ function DesktopApp() {
   const { getReferenceProps, getFloatingProps } = useInteractions([click, dismiss, role])
 
   const loadData = async () => {
-    const [all, latest, currentQuest] = await Promise.all([listCheckins(), getLatestCheckin(), getActiveQuest()])
-    setCheckins(all)
-    setLatestCheckin(latest)
-    setActiveQuest(currentQuest)
-    const lastFrame = await getLastFrame()
-    if (lastFrame) {
-      setFrame(lastFrame)
-    } else {
-      setFrame(await computeAndSaveFrame())
+    try {
+      const [all, latest, currentQuest] = await Promise.all([listCheckins(), getLatestCheckin(), getActiveQuest()])
+      setCheckins(all)
+      setLatestCheckin(latest)
+      setActiveQuest(currentQuest)
+      const lastFrame = await getLastFrame()
+      if (lastFrame) {
+        setFrame(lastFrame)
+      } else {
+        setFrame(await computeAndSaveFrame())
+      }
+      setFatalDbError(null)
+    } catch (error) {
+      const fallback = getLastDbOpenFailure()
+      const report = fallback?.report ?? JSON.stringify({
+        kind: 'app-load-failed',
+        message: error instanceof Error ? error.message : String(error),
+        ts: Date.now(),
+      }, null, 2)
+      setFatalDbError({
+        message: fallback?.message ?? 'Не удалось открыть локальную базу данных.',
+        report,
+      })
     }
   }
 
@@ -185,6 +201,23 @@ function DesktopApp() {
       .map((group) => ({ ...group, items: group.items.filter((item) => item.label.toLowerCase().includes(query)) }))
       .filter((group) => group.items.length > 0)
   }, [moreSearch])
+
+  if (fatalDbError) {
+    return (
+      <main className="page">
+        <article className="panel">
+          <h1>Произошла ошибка</h1>
+          <p>{fatalDbError.message}</p>
+          <div className="settings-actions">
+            <button type="button" onClick={() => navigator.clipboard.writeText(fatalDbError.report)}>Скопировать отчёт</button>
+            <button type="button" onClick={() => { void resetStorageAndReload() }}>Сбросить локальные данные</button>
+            <button type="button" onClick={() => window.location.reload()}>Перезагрузить</button>
+            <a href="#/system">Открыть Система</a>
+          </div>
+        </article>
+      </main>
+    )
+  }
 
   const renderNavLink = (page: NavItem, compact = false) => (
     <NavLink

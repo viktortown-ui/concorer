@@ -138,3 +138,86 @@ class ConcoreDb extends Dexie {
 }
 
 export const db = new ConcoreDb()
+
+export interface DbOpenFailure {
+  message: string
+  report: string
+}
+
+let lastDbOpenFailure: DbOpenFailure | null = null
+
+function createFailureReport(error: unknown): string {
+  const normalized = error instanceof Error
+    ? { name: error.name, message: error.message, stack: error.stack }
+    : { value: String(error) }
+  return JSON.stringify({
+    kind: 'dexie-open-failed',
+    schemaVersion,
+    ts: Date.now(),
+    error: normalized,
+  }, null, 2)
+}
+
+function showToast(message: string): void {
+  if (typeof window === 'undefined' || !window.document?.body) return
+  const host = window.document
+  const toast = host.createElement('div')
+  toast.textContent = message
+  toast.setAttribute('role', 'status')
+  toast.style.position = 'fixed'
+  toast.style.bottom = '16px'
+  toast.style.left = '50%'
+  toast.style.transform = 'translateX(-50%)'
+  toast.style.padding = '10px 14px'
+  toast.style.borderRadius = '10px'
+  toast.style.background = 'rgba(20, 20, 20, 0.92)'
+  toast.style.color = '#fff'
+  toast.style.fontSize = '14px'
+  toast.style.zIndex = '9999'
+  host.body.append(toast)
+  window.setTimeout(() => toast.remove(), 2200)
+}
+
+db.on('blocked', () => {
+  const message = 'База обновляется. Закройте другие вкладки Concorer и обновите страницу.'
+  if (typeof window !== 'undefined') window.localStorage.setItem('gamno.dbBlockedMessage', message)
+  showToast(message)
+})
+
+db.on('versionchange', () => {
+  db.close()
+  showToast('Обновление… перезагрузка')
+  if (typeof window !== 'undefined') {
+    window.setTimeout(() => {
+      if (typeof window !== 'undefined') window.location.reload()
+    }, 350)
+  }
+})
+
+export function getLastDbOpenFailure(): DbOpenFailure | null {
+  return lastDbOpenFailure
+}
+
+export async function openDbWithRecovery(): Promise<void> {
+  try {
+    await db.open()
+    lastDbOpenFailure = null
+    if (typeof window !== 'undefined') window.localStorage.removeItem('gamno.dbOpenFailure')
+  } catch (error) {
+    const report = createFailureReport(error)
+    lastDbOpenFailure = {
+      message: 'Не удалось открыть локальную базу данных. Попробуйте сброс локальных данных.',
+      report,
+    }
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('gamno.dbOpenFailure', report)
+      window.localStorage.setItem('gamno.lastError', report)
+    }
+    throw error
+  }
+}
+
+export async function resetStorageAndReload(): Promise<void> {
+  await db.delete()
+  if (typeof window !== 'undefined') window.location.reload()
+}

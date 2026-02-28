@@ -1,5 +1,5 @@
 import { schemaVersion } from '../core/storage/db'
-import { db } from '../core/storage/db'
+import { db, resetStorageAndReload } from '../core/storage/db'
 import { getLastFrame } from '../repo/frameRepo'
 import { getLatestForecastRun } from '../repo/forecastRepo'
 import { getLastBlackSwanRun } from '../repo/blackSwanRepo'
@@ -142,6 +142,9 @@ export function SystemPage() {
         <p>Последний Чёрные лебеди: <strong className="mono">{stats.blackSwanTs ?? '—'}</strong></p>
         <p>Последний Мультивселенная: <strong className="mono">{stats.multiverseTs ?? '—'}</strong></p>
         <p>Счётчики: checkins={stats.counts.checkins ?? 0}, events={stats.counts.events ?? 0}, frames={stats.counts.frames ?? 0}, runs={stats.counts.runs ?? 0}</p>
+        <div className="settings-actions">
+          <button type="button" onClick={() => { void resetStorageAndReload() }}>Reset storage</button>
+        </div>
 
         <section className="panel" aria-label="Карта мира ссылка">
           <h2>Карта мира</h2>
