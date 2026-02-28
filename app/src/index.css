@@ -3405,6 +3405,31 @@ button.danger { background: color-mix(in srgb, #e45959 30%, var(--panel) 70%); b
   text-align: left;
 }
 
+
+.goals-druid-headline {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.goals-druid-headline p {
+  margin: 0;
+}
+
+.goals-druid-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.forge-sheet__actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
 .goals-debug-toggle {
   display: flex;
   align-items: center;
@@ -3419,12 +3444,15 @@ button.danger { background: color-mix(in srgb, #e45959 30%, var(--panel) 70%); b
   backdrop-filter: blur(6px);
   display: flex;
   justify-content: flex-end;
+  overscroll-behavior: contain;
 }
 
 .forge-sheet {
-  width: min(92vw, 480px);
+  width: min(92vw, 540px);
   height: 100vh;
   overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   background:
     radial-gradient(120% 80% at 100% 0%, color-mix(in oklab, var(--accent) 24%, transparent), transparent 65%),
     linear-gradient(180deg, color-mix(in oklab, var(--panel) 90%, #0a1020), color-mix(in oklab, var(--panel) 96%, #060a14));
@@ -3447,17 +3475,19 @@ button.danger { background: color-mix(in srgb, #e45959 30%, var(--panel) 70%); b
 .forge-sheet__section-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
 
 .forge-presets {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .forge-preset {
   text-align: left;
-  padding: 10px;
-  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  border-radius: 999px;
   border: 1px solid color-mix(in oklab, var(--border) 76%, #ffffff16);
   background: color-mix(in oklab, var(--panel) 88%, #0d1529);
+  font-weight: 600;
+  line-height: 1.2;
 }
 
 .forge-preset--active {
@@ -3465,11 +3495,9 @@ button.danger { background: color-mix(in srgb, #e45959 30%, var(--panel) 70%); b
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 24%, transparent), inset 0 0 24px #4f8cff1c;
 }
 
-.forge-preset span { display: block; font-size: 0.8rem; opacity: 0.78; margin-top: 4px; }
-
 .forge-runes-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-2);
 }
 
@@ -3478,6 +3506,9 @@ button.danger { background: color-mix(in srgb, #e45959 30%, var(--panel) 70%); b
   border-radius: var(--radius-md);
   padding: 10px;
   background: color-mix(in oklab, var(--panel) 90%, #0f162a);
+  min-height: 220px;
+  display: grid;
+  align-content: space-between;
 }
 .rune-dial h4 { margin: 0 0 2px; font-size: 0.9rem; }
 .rune-dial p { margin: 0; opacity: 0.82; }
@@ -3494,6 +3525,11 @@ button.danger { background: color-mix(in srgb, #e45959 30%, var(--panel) 70%); b
   border-radius: var(--radius-md);
   padding: 12px;
   background: color-mix(in oklab, var(--panel) 88%, #0f1b30);
+}
+
+.forge-preview--hero {
+  border-color: color-mix(in oklab, var(--accent) 50%, #ffffff20);
+  box-shadow: 0 10px 26px #00000033, inset 0 0 40px color-mix(in oklab, var(--accent) 16%, transparent);
 }
 
 .forge-preview h3 { margin-top: 0; }
@@ -3518,6 +3554,10 @@ button.danger { background: color-mix(in srgb, #e45959 30%, var(--panel) 70%); b
     border-top: 1px solid color-mix(in oklab, var(--border) 82%, #ffffff12);
     border-radius: 16px 16px 0 0;
     box-shadow: 0 -16px 48px #0000005c;
+  }
+
+  .forge-runes-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

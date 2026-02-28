@@ -9,7 +9,7 @@ export function ForgePreview({ coresMin, coresMax, weather, risk }: ForgePreview
   const weatherValue = weather === 'Штиль' ? 1 : weather === 'Ветер' ? 2 : 3
 
   return (
-    <section className="forge-preview">
+    <section className="forge-preview forge-preview--hero">
       <h3>Что это даст</h3>
       <div className="forge-preview__cores">
         <span>Ядра</span>

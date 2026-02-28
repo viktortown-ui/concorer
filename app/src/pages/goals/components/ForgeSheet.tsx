@@ -25,7 +25,8 @@ export function ForgeSheet({ open, title, onClose, children }: ForgeSheetProps) 
 
     const panel = panelRef.current
     const focusable = panel ? Array.from(panel.querySelectorAll<HTMLElement>(focusableSelectors)) : []
-    focusable[0]?.focus()
+    if (focusable[0]) focusable[0].focus()
+    else panel?.focus()
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (!open) return
@@ -62,7 +63,7 @@ export function ForgeSheet({ open, title, onClose, children }: ForgeSheetProps) 
 
   return (
     <div className="forge-sheet-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <div ref={panelRef} className="forge-sheet" role="dialog" aria-modal="true" aria-label={title}>
+      <div ref={panelRef} className="forge-sheet" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}>
         {children}
       </div>
     </div>
